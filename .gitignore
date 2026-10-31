@@ -1,0 +1,8 @@
+# The data of the services, mounted into the containers: photos, databases,
+# documents, repositories.
+/data/
+
+# Real env files, with secrets. The env/*.env.example files are in git.
+/env/*.env
+
+.DS_Store

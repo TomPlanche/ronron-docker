@@ -1,0 +1,276 @@
+# Production stack of ronron, the home server (Debian, x86_64).
+#
+# All the images come from their upstream registry: ronron builds nothing.
+# Test this stack locally with `just local-up`, which adds compose.local.yaml
+# on top of this file.
+#
+# Not in git: env/*.env (secrets, see env/*.env.example) and data/ (the data of
+# the services).
+#
+# Addresses: 10.10.0.4 is ronron on WireGuard (wg0). The Caddy of the Hetzner
+# VPS reaches Immich and Forgejo there. Docker starts after wg-quick@wg0 (see
+# host/systemd/docker.service.d/after-wg.conf), so the containers can bind
+# 10.10.0.4.
+
+name: ronron
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  # Immich: the photos. Hardware transcoding (Quick Sync) and machine learning
+  # (OpenVINO) on the Intel iGPU.
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:v3.3.5
+    env_file: env/immich.env
+    # These values win over the env file.
+    environment:
+      DB_HOSTNAME: immich-postgres
+      DB_USERNAME: postgres
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: immich-redis
+    devices:
+      - /dev/dri:/dev/dri
+    ports:
+      # LAN and WireGuard. IPv4 only: Docker bypasses ufw, and a bare port
+      # would also bind on IPv6.
+      - 0.0.0.0:2283:2283
+    volumes:
+      - ./data/immich/library:/data
+      - /etc/localtime:/etc/localtime:ro
+    networks: [immich]
+    depends_on:
+      - immich-redis
+      - immich-postgres
+    restart: unless-stopped
+    logging: *logging
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:v3.3.5-openvino
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - immich-model-cache:/cache
+    networks: [immich]
+    restart: unless-stopped
+    logging: *logging
+
+  immich-redis:
+    image: docker.io/valkey/valkey:9@sha256:c123e3715db63d06d4ad6964884037aa0d5d4d703939b9929954112889708e1d
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    networks: [immich]
+    restart: unless-stopped
+    logging: *logging
+
+  # The Postgres of Immich, with the vector extensions that Immich needs.
+  immich-postgres:
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    # POSTGRES_PASSWORD: used only to create a new database.
+    env_file: env/immich.env
+    environment:
+      # The health check of the image uses them.
+      POSTGRES_USER: postgres
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: --data-checksums
+    volumes:
+      - ./data/immich/postgres:/var/lib/postgresql/data
+    shm_size: 128mb
+    networks: [immich]
+    restart: unless-stopped
+    logging: *logging
+
+  # Paperless-ngx: the documents. Its database is SQLite, in data/paperless/data.
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.0.5
+    env_file: env/paperless.env
+    environment:
+      PAPERLESS_REDIS: redis://paperless-redis:6379
+    ports:
+      # WireGuard only: not reachable from the LAN or the internet.
+      - 10.10.0.4:8000:8000
+    volumes:
+      - ./data/paperless/data:/usr/src/paperless/data
+      - ./data/paperless/media:/usr/src/paperless/media
+      - ./data/paperless/export:/usr/src/paperless/export
+      - ./data/paperless/consume:/usr/src/paperless/consume
+    networks: [paperless]
+    depends_on:
+      - paperless-redis
+    restart: unless-stopped
+    logging: *logging
+
+  paperless-redis:
+    image: docker.io/library/redis:8.10.2
+    volumes:
+      - paperless-redis:/data
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    networks: [paperless]
+    restart: unless-stopped
+    logging: *logging
+
+  # Pi-hole: the DNS of the LAN. Host network: it answers on port 53 of ronron,
+  # and its web UI is on port 8080, so that ports 80 and 443 stay free.
+  pihole:
+    image: pihole/pihole:2026.10.0
+    network_mode: host
+    cap_add:
+      - NET_ADMIN # required for DHCP
+    env_file: env/pihole.env
+    environment:
+      TZ: Europe/Paris
+      FTLCONF_dhcp_active: "false"
+      FTLCONF_dhcp_end: "192.168.1.180"
+      FTLCONF_dhcp_leaseTime: "24h"
+      FTLCONF_dhcp_rapidCommit: "true" # avoids broadcast REQUEST the Bbox NACKs
+      FTLCONF_dhcp_router: "192.168.1.254"
+      FTLCONF_dhcp_start: "192.168.1.100"
+      FTLCONF_dns_hosts: "192.168.1.254 mabbox.bytel.fr;192.168.1.83 pihole.lan ronron.lan"
+      FTLCONF_dns_listeningMode: local
+      FTLCONF_dns_upstreams: "9.9.9.9;149.112.112.112"
+      FTLCONF_misc_dnsmasq_lines: "dhcp-broadcast" # Wi-Fi clients sometimes miss unicast offers
+      FTLCONF_misc_nice: "-999"
+      FTLCONF_ntp_ipv4_active: "false"
+      FTLCONF_ntp_ipv6_active: "false"
+      FTLCONF_ntp_sync_active: "false"
+      FTLCONF_webserver_port: "8080o,[::]:8080o" # keep host 80/443 free
+    volumes:
+      - ./data/pihole:/etc/pihole
+    restart: unless-stopped
+    logging: *logging
+
+  # Forgejo: the git server. The theme and templates of forgejo/custom/ (the git
+  # submodule forgejo, repository tom/forgejo) go over the data volume, through
+  # the custom/ mechanism of Forgejo: no image build.
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:16.0.4
+    environment:
+      USER_UID: 1000
+      USER_GID: 1000
+
+      FORGEJO__database__DB_TYPE: sqlite3
+
+      # The default MIGRATE timeout (600 s) is too short for large repositories
+      # (zed, typst-packages, for example): they are cloned partway, then
+      # deleted. MIRROR covers the periodic resync of the same repositories.
+      FORGEJO__git.timeout__MIGRATE: "3600"
+      FORGEJO__git.timeout__MIRROR: "3600"
+      FORGEJO__git.timeout__CLONE: "3600"
+      FORGEJO__git.timeout__PULL: "3600"
+
+      FORGEJO__other__SHOW_FOOTER_POWERED_BY: "false"
+      FORGEJO__other__SHOW_FOOTER_TEMPLATE_LOAD_TIME: "true"
+      FORGEJO__other__SHOW_FOOTER_VERSION: "true"
+
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__security__REVERSE_PROXY_TRUSTED_PROXIES: 172.16.0.0/12,10.10.0.0/24,127.0.0.0/8
+
+      FORGEJO__server__DOMAIN: git.tomplanche.com
+      FORGEJO__server__ROOT_URL: https://git.tomplanche.com/
+      FORGEJO__server__SSH_DOMAIN: git.tomplanche.com
+      # The VPS forwards its port 2223 to port 2222 of ronron.
+      FORGEJO__server__SSH_PORT: 2223
+
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+
+      FORGEJO__ui__DEFAULT_THEME: tomplanche
+      FORGEJO__ui__THEMES: forgejo-auto,forgejo-light,forgejo-dark,tomplanche
+
+      TZ: Europe/Paris
+    volumes:
+      - ./data/forgejo:/data
+      - ./forgejo/custom/templates:/data/gitea/templates:ro
+      # With the fonts of the theme in custom/public/assets/fonts: the
+      # repository forgejo ignores them (license), so copy them there.
+      - ./forgejo/custom/public:/data/gitea/public:ro
+      # Written by contrib-worker.
+      - ./data/forgejo/contrib-cache:/data/gitea/public/assets/generated:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      # LAN and WireGuard. IPv4 only: Docker bypasses ufw, and a bare port
+      # would also bind on IPv6.
+      - 0.0.0.0:3000:3000
+      - 0.0.0.0:2222:22
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:3000/api/healthz"]
+      interval: 60s
+      timeout: 5s
+      start_period: 30s
+    networks: [forgejo]
+    restart: unless-stopped
+    logging: *logging
+
+  # Counts the commits of TARGET_USER per day in all the repositories, from
+  # their git history, and writes the result to data/forgejo/contrib-cache. See
+  # forgejo/contrib-worker/generate_contributions.py.
+  contrib-worker:
+    image: ghcr.io/astral-sh/uv:0.13.4-python3.13-alpine
+    env_file: env/contrib-worker.env
+    environment:
+      FORGEJO_URL: http://forgejo:3000
+      TARGET_USER: tom
+      INTERVAL: "60"
+    volumes:
+      - ./forgejo/contrib-worker/generate_contributions.py:/app/generate_contributions.py:ro
+      - ./data/forgejo/contrib-cache:/output
+    command: ["uv", "run", "/app/generate_contributions.py"]
+    networks: [forgejo]
+    depends_on:
+      - forgejo
+    restart: unless-stopped
+    logging: *logging
+
+  # Beszel agent: it gives the CPU, RAM, disks, network, temperatures, GPU and
+  # containers of ronron to the Beszel hub of the Hetzner VPS. The hub connects
+  # to the agent over WireGuard, with SSH (10.10.0.1 to 10.10.0.4:45876). The
+  # agent accepts only the key of the hub (KEY). In the hub, the system
+  # "ronron" has the host 10.10.0.4 and the port 45876.
+  beszel-agent:
+    # The same version as the hub. The Intel variant contains intel_gpu_top,
+    # which reads the iGPU (i915 driver).
+    image: henrygd/beszel-agent-intel:0.21.1
+    # Host network: the agent reads the network of the host, and it listens on
+    # the WireGuard address of ronron.
+    network_mode: host
+    # intel_gpu_top reads the GPU through perf events, which need CAP_PERFMON.
+    # Debian sets kernel.perf_event_paranoid=3, which blocks them even with
+    # CAP_PERFMON: ronron needs 2 (/etc/sysctl.d/99-intel-gpu-beszel.conf).
+    cap_add:
+      - CAP_PERFMON
+    devices:
+      - /dev/dri/card0:/dev/dri/card0
+    environment:
+      # wg0 only: the LAN cannot reach the agent.
+      LISTEN: 10.10.0.4:45876
+      # The public key of the hub. It is not a secret.
+      KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDbM7AfwkiQpWFPNfDu/xfcs+9c8WFJ05HW3XWsTsqdt"
+    volumes:
+      - ./data/beszel-agent:/var/lib/beszel-agent
+      # Read only, but the Docker socket still gives wide access to the host.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # The backup disk (Samsung T5, sdb1 on /srv/backup). The agent reads the
+      # usage of the filesystem of this empty folder, which Docker creates.
+      - /srv/backup/.beszel:/extra-filesystems/sdb1__Backup:ro
+    healthcheck:
+      test: ["CMD", "/agent", "health"]
+      interval: 60s
+      timeout: 5s
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  # One network per app: the containers of an app cannot reach the others.
+  immich:
+  paperless:
+  forgejo:
+
+volumes:
+  # A cache: Immich downloads the models again when it is empty.
+  immich-model-cache:
+  # The task queue of Paperless.
+  paperless-redis:

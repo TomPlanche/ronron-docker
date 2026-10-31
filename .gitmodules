@@ -1,0 +1,3 @@
+[submodule "forgejo"]
+	path = forgejo
+	url = https://git.tomplanche.com/tom/forgejo.git
