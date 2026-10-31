@@ -1,5 +1,5 @@
 # ronron-docker: the Docker stack of ronron, the home server (Immich,
-# Paperless, Pi-hole, Forgejo, Beszel agent).
+# Paperless, Forgejo, Beszel agent).
 #
 # [local] recipes run on the local machine: test the stack before a deploy.
 # [local or ronron] recipes act on the stack of ronron: over SSH from the local
@@ -32,7 +32,7 @@ default:
 
 # Start the stack locally, then wait for the health checks [local]
 local-up: _local-machine
-    {{local}} up -d --wait --remove-orphans immich-server paperless pihole forgejo
+    {{local}} up -d --wait --remove-orphans immich-server paperless forgejo
 
 # Check the local stack [local]
 local-test: _local-machine
@@ -70,15 +70,6 @@ local-test: _local-machine
         check "forgejo: font of forgejo/custom/public/assets/fonts" 200 http://127.0.0.1:3010/assets/fonts/Monocraft.ttf
     else
         echo "skip  forgejo fonts: no forgejo/custom/public/assets/fonts"
-    fi
-    check "pihole: web UI" 200 http://127.0.0.1:8081/admin/login "<html"
-    # The local names of FTLCONF_dns_hosts, through the DNS of Pi-hole.
-    answer=$(dig +short +time=2 +tries=1 -p 1053 @127.0.0.1 ronron.lan 2>&1)
-    if [ "$answer" = "192.168.1.83" ]; then
-        echo "ok    pihole: DNS answers ronron.lan"
-    else
-        echo "FAIL  pihole: DNS answers \"$answer\" for ronron.lan, expected 192.168.1.83"
-        failed=$((failed + 1))
     fi
     if [ "$failed" -gt 0 ]; then
         echo "$failed check(s) failed"

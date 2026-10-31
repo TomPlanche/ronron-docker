@@ -113,36 +113,6 @@ services:
     restart: unless-stopped
     logging: *logging
 
-  # Pi-hole: the DNS of the LAN. Host network: it answers on port 53 of ronron,
-  # and its web UI is on port 8080, so that ports 80 and 443 stay free.
-  pihole:
-    image: pihole/pihole:2026.10.0
-    network_mode: host
-    cap_add:
-      - NET_ADMIN # required for DHCP
-    env_file: env/pihole.env
-    environment:
-      TZ: Europe/Paris
-      FTLCONF_dhcp_active: "false"
-      FTLCONF_dhcp_end: "192.168.1.180"
-      FTLCONF_dhcp_leaseTime: "24h"
-      FTLCONF_dhcp_rapidCommit: "true" # avoids broadcast REQUEST the Bbox NACKs
-      FTLCONF_dhcp_router: "192.168.1.254"
-      FTLCONF_dhcp_start: "192.168.1.100"
-      FTLCONF_dns_hosts: "192.168.1.254 mabbox.bytel.fr;192.168.1.83 pihole.lan ronron.lan"
-      FTLCONF_dns_listeningMode: local
-      FTLCONF_dns_upstreams: "9.9.9.9;149.112.112.112"
-      FTLCONF_misc_dnsmasq_lines: "dhcp-broadcast" # Wi-Fi clients sometimes miss unicast offers
-      FTLCONF_misc_nice: "-999"
-      FTLCONF_ntp_ipv4_active: "false"
-      FTLCONF_ntp_ipv6_active: "false"
-      FTLCONF_ntp_sync_active: "false"
-      FTLCONF_webserver_port: "8080o,[::]:8080o" # keep host 80/443 free
-    volumes:
-      - ./data/pihole:/etc/pihole
-    restart: unless-stopped
-    logging: *logging
-
   # Forgejo: the git server. The theme and templates of forgejo/custom/ (the git
   # submodule forgejo, repository tom/forgejo) go over the data volume, through
   # the custom/ mechanism of Forgejo: no image build.

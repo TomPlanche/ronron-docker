@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Nightly backup of the stack of ronron (~/ronron-docker) into the local restic
+# repository. Installed as /usr/local/sbin/ronron-backup, and run as root by
+# ronron-backup.timer (host/systemd/).
+set -euo pipefail
+
+export RESTIC_REPOSITORY=/srv/backup/restic
+export RESTIC_PASSWORD_FILE=/root/.restic-password
+
+STACK=/home/tomplanche/ronron-docker
+# The push URL of the monitor in Uptime Kuma, without the query: it holds a
+# token, so it is in a file of root, not in this public repository.
+KUMA_PUSH_URL_FILE=/root/.kuma-push-url
+
+compose() {
+    docker compose -f "$STACK/compose.yaml" "$@"
+}
+
+# With "nofail", a missing disk leaves an empty mountpoint on the root fs.
+mountpoint -q /srv/backup || { echo "backup disk not mounted, aborting" >&2; exit 1; }
+
+# The env files: the secrets of the stack.
+restic backup --tag env "$STACK/env"
+
+# Forgejo and Paperless: stop them for a consistent snapshot of their SQLite
+# database and their files; always start them again, even on failure.
+backup_stopped() {  # backup_stopped <tag> <services> <paths...>
+    local tag=$1 services=$2
+    shift 2
+    compose stop $services
+    # Expand now: $services is local, and it is gone when the trap runs.
+    # shellcheck disable=SC2064
+    trap "compose start $services" EXIT
+    restic backup --tag "$tag" "$@"
+    compose start $services
+    trap - EXIT
+}
+
+# Forgejo: the repositories, the database and the config, and the fonts of the
+# theme (not in git). contrib-worker reads Forgejo: it stops too.
+backup_stopped forgejo "forgejo contrib-worker" \
+  "$STACK/data/forgejo" \
+  "$STACK/forgejo/custom/public/assets/fonts"
+
+# Paperless: the database, the documents, the exports and the inbox.
+backup_stopped paperless paperless "$STACK/data/paperless"
+
+# Immich: originals + automatic DB dumps (library/backups).
+# Live postgres files are inconsistent while running; thumbs and transcodes are regenerable.
+restic backup --tag immich \
+  --exclude "$STACK/data/immich/library/thumbs" \
+  --exclude "$STACK/data/immich/library/encoded-video" \
+  "$STACK/data/immich/library"
+
+# Retention: 7 daily, 4 weekly, 6 monthly snapshots.
+restic forget --prune --keep-daily 7 --keep-weekly 4 --keep-monthly 6
+
+# Verify repository structure and re-read a random 1% of the data.
+restic check --read-data-subset=1%
+
+# Heartbeat to Uptime Kuma: only reached if every step above succeeded (set -e).
+if [ -r "$KUMA_PUSH_URL_FILE" ]; then
+    curl -fsS -m 10 --retry 3 "$(cat "$KUMA_PUSH_URL_FILE")?status=up&msg=OK" > /dev/null || true
+fi

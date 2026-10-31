@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly restic backup of ronron services
+After=docker.service
+RequiresMountsFor=/srv/backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ronron-backup
+Nice=10
+IOSchedulingClass=idle

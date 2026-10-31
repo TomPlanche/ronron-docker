@@ -1,16 +1,17 @@
 # ronron-docker
 
-A Docker Compose stack for a home server: a photo library (Immich), a document archive (Paperless-ngx), the DNS of the LAN (Pi-hole), a git server (Forgejo) and the agent of a resource dashboard (Beszel). All the images come from their upstream registries, with a fixed version: the server builds nothing. A local test checks the stack before each deploy.
+A Docker Compose stack for a home server: a photo library (Immich), a document archive (Paperless-ngx), a git server (Forgejo) and the agent of a resource dashboard (Beszel). All the images come from their upstream registries, with a fixed version: the server builds nothing. A local test checks the stack before each deploy.
 
 ## Layout
 
 | Path | Content |
 |------|---------|
 | `compose.yaml` | The production stack, on the server. |
-| `compose.local.yaml` | The changes for a local test: test env files, ports on `127.0.0.1`, no GPU, Pi-hole on a bridge network. |
+| `compose.local.yaml` | The changes for a local test: test env files, ports on `127.0.0.1`, no GPU. |
 | `env/*.env.example` | The keys of each env file, with the values of the local test. The real `env/*.env` files exist only on the server. |
 | `forgejo/` | A git submodule: the repository [tom/forgejo](https://git.tomplanche.com/tom/forgejo), with the theme and the templates of Forgejo (`custom/`, mounted over its data through the `custom/` mechanism of Forgejo, no image build) and the script of `contrib-worker`. |
 | `host/systemd/docker.service.d/after-wg.conf` | A drop-in of systemd: Docker starts after WireGuard, so the containers can bind the WireGuard address. |
+| `host/ronron-backup`, `host/systemd/ronron-backup.{service,timer}` | The nightly backup of the stack with restic (see "Backups"). |
 | `justfile` | All the commands. Run `just` to list them. |
 | `data/` (not in git) | The data of the services: photos, databases, documents, repositories, and the fonts of the Forgejo theme. |
 
@@ -24,7 +25,6 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 | `immich-postgres` | `ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0`, by digest | none | `env/immich.env` | `data/immich/postgres` |
 | `paperless` | `ghcr.io/paperless-ngx/paperless-ngx:3.0.5` | `10.10.0.4:8000` | `env/paperless.env` | `data/paperless/{data,media,export,consume}` |
 | `paperless-redis` | `redis:8.10.2` | none | none | the volume `paperless-redis` |
-| `pihole` | `pihole/pihole:2026.10.0` | host network: `53` (DNS), `8080` (web UI) | `env/pihole.env` | `data/pihole` on `/etc/pihole` |
 | `forgejo` | `codeberg.org/forgejo/forgejo:16.0.4` | `0.0.0.0:3000` (web), `0.0.0.0:2222` (SSH) | none | `data/forgejo` on `/data`, `forgejo/custom/` |
 | `contrib-worker` | `ghcr.io/astral-sh/uv:0.13.4-python3.13-alpine` | none | `env/contrib-worker.env` | `data/forgejo/contrib-cache` on `/output` |
 | `beszel-agent` | `henrygd/beszel-agent-intel:0.21.1` | host network: `10.10.0.4:45876` | none | `data/beszel-agent`, the Docker socket (read only), `/dev/dri/card0` |
@@ -36,7 +36,6 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 - Immich transcodes the videos with Quick Sync, and runs its machine learning with OpenVINO, both on the Intel iGPU (`/dev/dri`).
 - Immich and its Postgres read their password from `env/immich.env`. Postgres uses it only to create a new database. The user (`postgres`) and the database (`immich`) are in `compose.yaml`.
 - The database of Paperless and of Forgejo is SQLite, in their data folder.
-- Pi-hole uses the host network. It answers the DNS queries of the LAN on port 53, and the names of `FTLCONF_dns_hosts` (`ronron.lan`, for example). Its DHCP is off. Its web UI is on port 8080, so the ports 80 and 443 stay free.
 - The fonts of the Forgejo theme have a license that does not allow them in a public repository. The repository forgejo ignores them: copy them into `forgejo/custom/public/assets/fonts`. Without them, the theme uses fallback fonts.
 - The heatmap of Forgejo counts the events of the instance, not the dates of the commits: a migrated repository adds nothing for its old commits. `contrib-worker` reads the history of all the repositories every minute, counts the commits of `TARGET_USER` per day, and writes the result to `data/forgejo/contrib-cache`, which Forgejo serves under `/assets/generated/`. The template `custom/templates/custom/footer.tmpl` of the submodule then puts this data in the heatmap.
 - The Beszel agent listens on WireGuard only. The Beszel hub (on the VPS) connects to it with SSH. The agent accepts only the public key of the hub (`KEY` in `compose.yaml`, not a secret). See "Monitoring".
@@ -44,7 +43,7 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 
 ## Local test
 
-Requirements: Docker with Compose 2.24 or later, `just`, `curl`, `dig`, and this repository with its submodule: clone it with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone.
+Requirements: Docker with Compose 2.24 or later, `just`, `curl`, and this repository with its submodule: clone it with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone.
 
 1. Start the stack. The first start downloads the images (some GB). The command waits for the health checks:
 
@@ -60,7 +59,7 @@ Requirements: Docker with Compose 2.24 or later, `just`, `curl`, `dig`, and this
    just local-test
    ```
 
-3. Open http://localhost:2283 (Immich: make the first user), http://localhost:8010 (Paperless, user `admin`, password `local-test-password`), http://localhost:3010 (Forgejo) and http://localhost:8081/admin (Pi-hole, password `local-test-password`). Paperless and Forgejo are not on ports 8000 and 3000, so that the local test of another stack can use these ports at the same time.
+3. Open http://localhost:2283 (Immich: make the first user), http://localhost:8010 (Paperless, user `admin`, password `local-test-password`) and http://localhost:3010 (Forgejo). Paperless and Forgejo are not on ports 8000 and 3000, so that the local test of another stack can use these ports at the same time.
 
 4. Stop the stack. `-v` also deletes the local database of Immich:
 
@@ -91,7 +90,7 @@ The server needs:
   ```
 
 - this repository in `~/ronron-docker`, with its submodule (`git clone --recurse-submodules`);
-- the env files `env/immich.env`, `env/paperless.env`, `env/pihole.env` and `env/contrib-worker.env`, made from `env/*.env.example` with the real values;
+- the env files `env/immich.env`, `env/paperless.env` and `env/contrib-worker.env`, made from `env/*.env.example` with the real values;
 - the data of the services in `data/` (see "New server").
 
 ### The address of the server
@@ -143,7 +142,6 @@ The submodule `forgejo` points to one commit of [tom/forgejo](https://git.tompla
 | `data/immich/library` | The photos and videos of Immich, its thumbnails and its database dumps. |
 | `data/immich/postgres` | The database of Immich. |
 | `data/paperless/{data,media,export,consume}` | The database, the documents, the exports and the inbox of Paperless. |
-| `data/pihole` | The config and the lists of Pi-hole. |
 | `data/forgejo` | The repositories, the SQLite database and the config (`gitea/conf/app.ini`) of Forgejo. |
 | `data/beszel-agent` | The identity of the agent for the hub. |
 | `forgejo/custom/public/assets/fonts` | The fonts of the Forgejo theme (not in git, see "Services"). |
@@ -159,9 +157,35 @@ The agent sends the CPU, RAM, disks (the system disk and the backup disk), netwo
 
 ### Backups
 
-`data/` and `env/` hold all the state of the stack. The nightly backup of the server must include them.
+`data/` and `env/` hold all the state of the stack. `host/ronron-backup` saves them every night at 03:30 into a restic repository on the backup disk (`/srv/backup/restic`), with one tag per part:
 
-The files of a running Postgres are not a consistent copy. To restore Immich, use the database dumps that Immich writes every night in `data/immich/library/backups`.
+| Tag | Content | Stop |
+|-----|---------|------|
+| `env` | `env/` | none |
+| `forgejo` | `data/forgejo`, the fonts of the theme | `forgejo` and `contrib-worker`, during the snapshot |
+| `paperless` | `data/paperless` | `paperless`, during the snapshot |
+| `immich` | `data/immich/library`, without the thumbnails and the transcoded videos (Immich makes them again) | none |
+
+- The script stops nothing else, and it starts the stopped services again, also after an error.
+- The files of a running Postgres are not a consistent copy, so the script does not save `data/immich/postgres`. To restore Immich, use the database dumps that Immich writes every night at 03:00 in `data/immich/library/backups`.
+- It keeps 7 daily, 4 weekly and 6 monthly snapshots, then reads again 1 % of the data to check the repository.
+- At the end, if all went well, it sends a heartbeat to a push monitor of Uptime Kuma. A missing heartbeat makes Kuma send an alert.
+- It stops when the backup disk is not mounted.
+
+Install it on the server, once:
+
+1. Put the password of the restic repository in `/root/.restic-password`, and the push URL of the Kuma monitor, without `?status=...`, in `/root/.kuma-push-url`. Both files: owner root, mode 600. Without the URL file, the script sends no heartbeat.
+2. Install the script and its units, then start the timer:
+
+   ```bash
+   sudo install -m 755 host/ronron-backup /usr/local/sbin/ronron-backup && sudo install -m 644 host/systemd/ronron-backup.service host/systemd/ronron-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ronron-backup.timer
+   ```
+
+3. Run one backup now, and check its end:
+
+   ```bash
+   sudo systemctl start ronron-backup.service && journalctl -u ronron-backup.service -n 20 --no-pager
+   ```
 
 ## Recipes
 

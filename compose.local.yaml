@@ -5,8 +5,6 @@
 #   port 8010 and Forgejo on port 3010, so that the local test of hetzner-docker
 #   (ports 8000 and 3000) can run at the same time.
 # - No Intel GPU: Immich transcodes on the CPU.
-# - Pi-hole uses a bridge network, with its DNS on port 1053 (macOS uses 5353
-#   for mDNS) and its web UI on port 8081.
 # - contrib-worker (it needs a Forgejo token), immich-machine-learning (a
 #   large image) and beszel-agent (it needs the hub) do not start.
 
@@ -31,15 +29,6 @@ services:
       - env/paperless.env.example
     ports: !override
       - 127.0.0.1:8010:8000
-
-  pihole:
-    network_mode: !reset null
-    env_file: !override
-      - env/pihole.env.example
-    ports:
-      - 127.0.0.1:1053:53/udp
-      - 127.0.0.1:1053:53/tcp
-      - 127.0.0.1:8081:8080
 
   forgejo:
     environment:
