@@ -1,6 +1,6 @@
 # ronron-docker
 
-A Docker Compose stack for a home server: a photo library (Immich), a document archive (Paperless-ngx), a git server (Forgejo) and the agent of a resource dashboard (Beszel). All the images come from their upstream registries, with a fixed version: the server builds nothing. A local test checks the stack before each deploy.
+A Docker Compose stack for a home server: a photo library (Immich), a document archive (Paperless-ngx), a git server (Forgejo), the agent of a resource dashboard (Beszel), and a metrics store with its dashboards (VictoriaMetrics and Grafana). All the images come from their upstream registries, with a fixed version: the server builds nothing. A local test checks the stack before each deploy.
 
 ## Layout
 
@@ -10,6 +10,8 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 | `compose.local.yaml` | The changes for a local test: test env files, ports on `127.0.0.1`, no GPU. |
 | `env/*.env.example` | The keys of each env file, with the values of the local test. The real `env/*.env` files exist only on the server. |
 | `forgejo/` | A git submodule: the repository [tom/forgejo](https://git.tomplanche.com/tom/forgejo), with the theme and the templates of Forgejo (`custom/`, mounted over its data through the `custom/` mechanism of Forgejo, no image build). |
+| `grafana/provisioning/` | The data source (VictoriaMetrics) and the dashboard folder that Grafana reads at start-up. |
+| `grafana/dashboards/*.json` | The dashboards of Grafana (see "Metrics"). |
 | `host/systemd/docker.service.d/after-wg.conf` | A drop-in of systemd: Docker starts after WireGuard, so the containers can bind the WireGuard address. |
 | `host/ronron-backup`, `host/systemd/ronron-backup.{service,timer}` | The nightly backup of the stack with restic (see "Backups"). |
 | `justfile` | All the commands. Run `just` to list them. |
@@ -27,6 +29,8 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 | `paperless-redis` | `redis:8.10.2` | none | none | the volume `paperless-redis` |
 | `forgejo` | `codeberg.org/forgejo/forgejo:16.0.4` | `0.0.0.0:3000` (web), `0.0.0.0:2222` (SSH) | none | `data/forgejo` on `/data`, `forgejo/custom/` |
 | `beszel-agent` | `henrygd/beszel-agent-intel:0.21.1` | host network: `10.10.0.4:45876` | none | `data/beszel-agent`, the Docker socket (read only), `/dev/dri/card0` |
+| `victoriametrics` | `victoriametrics/victoria-metrics:v1.154.0` | `10.10.0.4:8428` | none | `data/victoriametrics` on `/storage` |
+| `grafana` | `grafana/grafana:13.2.4` | `10.10.0.4:3030` | `env/grafana.env` | `data/grafana`, `grafana/provisioning/{datasources,dashboards}`, `grafana/dashboards` |
 
 - `10.10.0.4` is the address of the server on WireGuard (`wg0`). The VPS is `10.10.0.1`. The Caddy of the VPS sends the public names of Immich and Forgejo to `10.10.0.4`, and the VPS sends its port 2223 to port 2222 (the SSH of Forgejo). That config is not in this repository.
 - Paperless listens on WireGuard only: the LAN and the internet cannot reach it.
@@ -37,6 +41,8 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 - The database of Paperless and of Forgejo is SQLite, in their data folder.
 - The fonts of the Forgejo theme have a license that does not allow them in a public repository. The repository forgejo ignores them: copy them into `forgejo/custom/public/assets/fonts`. Without them, the theme uses fallback fonts.
 - The Beszel agent listens on WireGuard only. The Beszel hub (on the VPS) connects to it with SSH. The agent accepts only the public key of the hub (`KEY` in `compose.yaml`, not a secret). See "Monitoring".
+- VictoriaMetrics keeps the metrics for 1 year. The vmagent of the VPS ([hetzner-docker](https://git.tomplanche.com/tom/hetzner-docker)) sends its metrics to it over WireGuard. VictoriaMetrics asks for no password: each WireGuard peer can read and write the metrics. See "Metrics".
+- Grafana listens on WireGuard only, as its own user (uid 1000, the owner of `data/grafana`). Its data source and its dashboards come from `grafana/`.
 - Each container keeps 3 log files of 10 MB at most.
 
 ## Local test
@@ -57,7 +63,7 @@ Requirements: Docker with Compose 2.24 or later, `just`, `curl`, and this reposi
    just local-test
    ```
 
-3. Open http://localhost:2283 (Immich: make the first user), http://localhost:8010 (Paperless, user `admin`, password `local-test-password`) and http://localhost:3010 (Forgejo). Paperless and Forgejo are not on ports 8000 and 3000, so that the local test of another stack can use these ports at the same time.
+3. Open http://localhost:2283 (Immich: make the first user), http://localhost:8010 (Paperless, user `admin`, password `local-test-password`), http://localhost:3010 (Forgejo) and http://localhost:3030 (Grafana, user `admin`, password `local-test-password`). Paperless and Forgejo are not on ports 8000 and 3000, so that the local test of another stack can use these ports at the same time. The local VictoriaMetrics is on http://localhost:8428. It holds only its own metrics: the dashboard of the VPS stays empty.
 
 4. Stop the stack. `-v` also deletes the local database of Immich:
 
@@ -88,7 +94,8 @@ The server needs:
   ```
 
 - this repository in `~/ronron-docker`, with its submodule (`git clone --recurse-submodules`);
-- the env files `env/immich.env` and `env/paperless.env`, made from `env/*.env.example` with the real values;
+- the env files `env/immich.env`, `env/paperless.env` and `env/grafana.env`, made from `env/*.env.example` with the real values;
+- the folder `data/grafana`, owned by the SSH user (uid 1000). Make it before the first start of Grafana: else Docker makes it for root, and Grafana cannot write to it;
 - the data of the services in `data/` (see "New server").
 
 ### The address of the server
@@ -142,6 +149,8 @@ The submodule `forgejo` points to one commit of [tom/forgejo](https://git.tompla
 | `data/paperless/{data,media,export,consume}` | The database, the documents, the exports and the inbox of Paperless. |
 | `data/forgejo` | The repositories, the SQLite database and the config (`gitea/conf/app.ini`) of Forgejo. |
 | `data/beszel-agent` | The identity of the agent for the hub. |
+| `data/grafana` | The users of Grafana and the dashboards made in its UI. |
+| `data/victoriametrics` | The history of the metrics. Without it, the history starts again from zero. |
 | `forgejo/custom/public/assets/fonts` | The fonts of the Forgejo theme (not in git, see "Services"). |
 
 ### Monitoring
@@ -153,6 +162,21 @@ The Beszel hub runs on the VPS. To add this server to the hub:
 
 The agent sends the CPU, RAM, disks (the system disk and the backup disk), network, temperatures, GPU and containers of the server.
 
+### Metrics
+
+Beszel shows the resources of the servers. VictoriaMetrics and Grafana show the other metrics: the requests of each site, the status codes, the durations, the bans of CrowdSec, and later the metrics of the apps.
+
+- The vmagent of the VPS reads the metrics there, and sends them to `http://10.10.0.4:8428/api/v1/write`. Each metric has the label `machine` (for example `machine="hetzner"`). While ronron does not answer, vmagent keeps the metrics on the disk of the VPS, and it sends them later.
+- Open Grafana on http://10.10.0.4:3030 from a WireGuard peer, or through an SSH tunnel: `just grafana-tunnel`, then http://localhost:3030. The user is `admin`, with the password of `env/grafana.env` (first start only).
+- The dashboards are files: `grafana/dashboards/*.json`. Grafana reads this folder again every 30 seconds, and it does not save a change made in its UI to these dashboards. To change one: edit it in Grafana, export its JSON (Export, Export as JSON) into `grafana/dashboards/`, commit, then deploy. A new dashboard made only in the UI stays in `data/grafana`.
+
+The first deploy:
+
+1. Make `env/grafana.env` from `env/grafana.env.example`, with a strong password.
+2. Make the data folder: `mkdir -p data/grafana`.
+3. Commit and push, then deploy: `just deploy victoriametrics grafana`.
+4. On the VPS, start vmagent (see the README of hetzner-docker).
+
 ### Backups
 
 `data/` and `env/` hold all the state of the stack. `host/ronron-backup` saves them every night at 03:30 into a restic repository on the backup disk (`/srv/backup/restic`), with one tag per part:
@@ -162,10 +186,12 @@ The agent sends the CPU, RAM, disks (the system disk and the backup disk), netwo
 | `env` | `env/` | none |
 | `forgejo` | `data/forgejo`, the fonts of the theme | `forgejo`, during the snapshot |
 | `paperless` | `data/paperless` | `paperless`, during the snapshot |
+| `grafana` | `data/grafana` | `grafana`, during the snapshot |
 | `immich` | `data/immich/library`, without the thumbnails and the transcoded videos (Immich makes them again) | none |
 
 - The script stops nothing else, and it starts the stopped services again, also after an error.
 - The files of a running Postgres are not a consistent copy, so the script does not save `data/immich/postgres`. To restore Immich, use the database dumps that Immich writes every night at 03:00 in `data/immich/library/backups`.
+- The script does not save `data/victoriametrics`: the metrics are only a history.
 - It keeps 7 daily, 4 weekly and 6 monthly snapshots, then reads again 1 % of the data to check the repository.
 - At the end, if all went well, it sends a heartbeat to a push monitor of Uptime Kuma. A missing heartbeat makes Kuma send an alert.
 - It stops when the backup disk is not mounted.
@@ -185,6 +211,8 @@ Install it on the server, once:
    sudo systemctl start ronron-backup.service && journalctl -u ronron-backup.service -n 20 --no-pager
    ```
 
+After a change of `host/ronron-backup`, install it again with the first command of step 2: the timer runs the copy in `/usr/local/sbin`, not the file of this repository.
+
 ## Recipes
 
 | Recipe | Runs on | What it does |
@@ -196,10 +224,12 @@ Install it on the server, once:
 | `just deploy [service...]` | local or server | Updates this repository on the server, pulls the images and starts the services. |
 | `just status` | local or server | `docker compose ps` on the server. |
 | `just logs [service...]` | local or server | Follows the logs on the server. |
+| `just grafana-tunnel` | local | Opens the Grafana of the server on http://localhost:3030, through an SSH tunnel. |
 
 ## Things to know
 
 - A restart of Immich or Forgejo stops it for some seconds. The Caddy of the VPS answers 502 during that time.
+- Grafana reads its data source at start-up only. After a change of `grafana/provisioning/`, deploy, then restart it on the server: `docker compose restart grafana`. A change of `grafana/dashboards/` needs no restart.
 - Docker keeps old images. Clean them on the server from time to time with `docker image prune`.
 - Compose reads `KEY=value` lines in the env files. A value with a `$` must be in single quotes, or Compose replaces the variable.
 - `env/*.env` and `data/` hold secrets and files that git does not track. Back them up with the server.

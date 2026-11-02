@@ -1,5 +1,5 @@
 # ronron-docker: the Docker stack of ronron, the home server (Immich,
-# Paperless, Forgejo, Beszel agent).
+# Paperless, Forgejo, Beszel agent, VictoriaMetrics and Grafana).
 #
 # [local] recipes run on the local machine: test the stack before a deploy.
 # [local or ronron] recipes act on the stack of ronron: over SSH from the local
@@ -32,7 +32,7 @@ default:
 
 # Start the stack locally, then wait for the health checks [local]
 local-up: _local-machine
-    {{local}} up -d --wait --remove-orphans immich-server paperless forgejo
+    {{local}} up -d --wait --remove-orphans immich-server paperless forgejo victoriametrics grafana
 
 # Check the local stack [local]
 local-test: _local-machine
@@ -71,6 +71,15 @@ local-test: _local-machine
     else
         echo "skip  forgejo fonts: no forgejo/custom/public/assets/fonts"
     fi
+    check "victoriametrics: health" 200 http://127.0.0.1:8428/health "OK"
+    check "grafana: health (database)" 200 http://127.0.0.1:3030/api/health '"database"'
+    # The login of env/grafana.env.example.
+    grafana=(-u admin:local-test-password)
+    check "grafana: data source of grafana/provisioning" 200 http://127.0.0.1:3030/api/datasources/uid/victoriametrics '"url":"http://victoriametrics:8428"' "${grafana[@]}"
+    check "grafana: dashboard of grafana/dashboards" 200 http://127.0.0.1:3030/api/dashboards/uid/hetzner-overview '"Hetzner: HTTP and security"' "${grafana[@]}"
+    # A query through Grafana: the data source reaches VictoriaMetrics, which
+    # holds its own metrics (-selfScrapeInterval).
+    check "grafana: query to victoriametrics" 200 "http://127.0.0.1:3030/api/datasources/proxy/uid/victoriametrics/api/v1/query?query=vm_app_version" '"status":"success"' "${grafana[@]}"
     if [ "$failed" -gt 0 ]; then
         echo "$failed check(s) failed"
         exit 1
@@ -95,6 +104,11 @@ status: _need-ronron
 # Follow the logs of services on ronron [local or ronron]
 logs *services: _need-ronron
     {{on_stack_tty}} 'cd {{stack_dir}} && docker compose logs -f --tail 100 {{services}}'
+
+# Open the Grafana of ronron on http://localhost:3030, through an SSH tunnel [local]
+grafana-tunnel: _local-machine _need-ronron
+    @echo "Grafana: http://localhost:3030 (Ctrl+C closes the tunnel)"
+    ssh -N -L 3030:10.10.0.4:3030 {{ronron}}
 
 # Stop on ronron: the recipe runs on the local machine
 [private]

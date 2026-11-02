@@ -211,11 +211,72 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  # VictoriaMetrics: the store of the metrics, in the Prometheus format. The
+  # vmagent of the Hetzner VPS sends its metrics here over WireGuard, and
+  # Grafana reads them. It also keeps its own metrics (-selfScrapeInterval).
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.154.0
+    command:
+      - -storageDataPath=/storage
+      - -retentionPeriod=1y
+      - -selfScrapeInterval=30s
+    ports:
+      # WireGuard only: the vmagent of the VPS writes here. There is no
+      # password, so each WireGuard peer can read and write the metrics.
+      - 10.10.0.4:8428:8428
+    volumes:
+      - ./data/victoriametrics:/storage
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8428/health"]
+      interval: 60s
+      timeout: 5s
+      start_period: 10s
+    networks: [monitoring]
+    restart: unless-stopped
+    logging: *logging
+
+  # Grafana: the dashboards of the metrics. The data source and the dashboards
+  # come from grafana/ (provisioning). The users and the dashboards made in the
+  # UI are in data/grafana.
+  grafana:
+    image: grafana/grafana:13.2.4
+    # The owner of data/grafana: make the folder before the first start, else
+    # Docker makes it for root and Grafana cannot write to it.
+    user: "1000:1000"
+    env_file: env/grafana.env
+    environment:
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      # WireGuard only. Port 3000 is Forgejo.
+      - 10.10.0.4:3030:3000
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+      # Only these 2 folders: the image keeps its other (empty) folders of
+      # provisioning, which Grafana reads at start-up.
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 60s
+      timeout: 5s
+      start_period: 30s
+    depends_on:
+      - victoriametrics
+    networks: [monitoring]
+    restart: unless-stopped
+    logging: *logging
+
 networks:
   # One network per app: the containers of an app cannot reach the others.
   immich:
   paperless:
   forgejo:
+  monitoring:
 
 volumes:
   # A cache: Immich downloads the models again when it is empty.

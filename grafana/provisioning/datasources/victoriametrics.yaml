@@ -1,0 +1,15 @@
+# The data source of the dashboards: VictoriaMetrics (compose.yaml). It answers
+# the Prometheus query API, so it uses the Prometheus data source of Grafana.
+apiVersion: 1
+
+datasources:
+  - name: VictoriaMetrics
+    uid: victoriametrics
+    type: prometheus
+    access: proxy
+    url: http://victoriametrics:8428
+    isDefault: true
+    editable: false
+    jsonData:
+      # The scrape interval of vmagent and of -selfScrapeInterval.
+      timeInterval: 30s

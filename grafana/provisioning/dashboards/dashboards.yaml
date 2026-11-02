@@ -1,0 +1,14 @@
+# The dashboards of grafana/dashboards/*.json, mounted on /etc/grafana/dashboards.
+# Grafana reads the folder again every 30 seconds. To change a dashboard, edit
+# it in Grafana, export its JSON (Export, Export as JSON) into that folder, then
+# commit.
+apiVersion: 1
+
+providers:
+  - name: ronron-docker
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
