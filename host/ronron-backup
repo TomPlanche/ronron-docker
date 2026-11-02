@@ -22,8 +22,9 @@ mountpoint -q /srv/backup || { echo "backup disk not mounted, aborting" >&2; exi
 # The env files: the secrets of the stack.
 restic backup --tag env "$STACK/env"
 
-# Forgejo, Paperless and Grafana: stop them for a consistent snapshot of their
-# SQLite database and their files; always start them again, even on failure.
+# Forgejo, Paperless, Grafana and atkuzu: stop them for a consistent snapshot
+# of their SQLite database and their files; always start them again, even on
+# failure.
 backup_stopped() {  # backup_stopped <tag> <services> <paths...>
     local tag=$1 services=$2
     shift 2
@@ -48,6 +49,13 @@ backup_stopped paperless paperless "$STACK/data/paperless"
 # Grafana: the users, and the dashboards made in the UI. The metrics of
 # VictoriaMetrics are only a history: they are not saved.
 backup_stopped grafana grafana "$STACK/data/grafana"
+
+# The apps: the database and the dailies of atkuzu, the static files of
+# vps-back (the resumes), and the fonts of the site (not in git).
+backup_stopped apps atkuzu \
+  "$STACK/data/atkuzu" \
+  "$STACK/data/vps-back" \
+  "$STACK/data/fonts"
 
 # Immich: originals + automatic DB dumps (library/backups).
 # Live postgres files are inconsistent while running; thumbs and transcodes are regenerable.

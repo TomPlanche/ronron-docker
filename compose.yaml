@@ -1,11 +1,13 @@
 # Production stack of ronron, the home server (Debian, x86_64).
 #
-# All the images come from their upstream registry: ronron builds nothing.
-# Test this stack locally with `just local-up`, which adds compose.local.yaml
-# on top of this file.
+# The images of the apps (vps-back, site, next-site, atkuzu) are built on
+# ronron, from the sources in src/ and the Dockerfiles in images/ (`just ship`).
+# All the other images come from their upstream registry. Test this stack
+# locally with `just local-up`, which adds compose.local.yaml on top of this
+# file.
 #
-# Not in git: env/*.env (secrets, see env/*.env.example) and data/ (the data of
-# the services).
+# Not in git: env/*.env (secrets, see env/*.env.example), data/ (the data of
+# the services) and src/ (the sources of the apps, cloned by scripts/sources.sh).
 #
 # Addresses: 10.10.0.4 is ronron on WireGuard (wg0). The Caddy of the Hetzner
 # VPS reaches Immich and Forgejo there. Docker starts after wg-quick@wg0 (see
@@ -271,12 +273,140 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  # The apps behind the public sites. The Caddy of the Hetzner VPS sends their
+  # names to these ports over WireGuard: api.tomplanche.com and
+  # tomplanche.com/api/* to vps-back, tomplanche.com to site,
+  # next.tomplanche.com to next-site, atkuzu.tomplanche.com to atkuzu. The ports
+  # listen on WireGuard only. Ports 3000 (Forgejo) and 8000 (Paperless) are
+  # taken, hence 3100-3102 and 8100.
+
+  # vps-back: the API (Rust, axum). It serves data/vps-back/static under
+  # /static/.
+  vps-back:
+    image: tomplanche/vps-back:main
+    build:
+      context: src/vps-back
+      dockerfile: ../../images/vps-back/Dockerfile
+    ports:
+      - 10.10.0.4:8100:8000
+    env_file: env/vps-back.env
+    # These values win over the env file.
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8000"
+      STATIC_DIR: /data/static
+    volumes:
+      # Served under /static/ (api.tomplanche.com/static/). Writable: vps-back
+      # writes github-stats.json in it.
+      - ./data/vps-back/static:/data/static
+    networks: [vps-back]
+    restart: unless-stopped
+    logging: *logging
+
+  # site and next-site: the portfolio front (SvelteKit), on the main and next
+  # branches of the same repository.
+  site:
+    image: tomplanche/portfolio:main
+    build:
+      context: src/site
+      dockerfile: ../../images/portfolio/Dockerfile
+      args:
+        COMMIT_SHA: ${SITE_COMMIT_SHA:-}
+        COMMIT_DATE: ${SITE_COMMIT_DATE:-}
+        COMMIT_URL: ${SITE_COMMIT_URL:-}
+    ports:
+      - 10.10.0.4:3100:3000
+    env_file: env/site.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+    volumes:
+      # The fonts of the site: their license keeps them out of the image.
+      - ./data/fonts:/app/build/client/fonts:ro
+    networks: [portfolio]
+    restart: unless-stopped
+    logging: *logging
+
+  next-site:
+    image: tomplanche/portfolio:next
+    build:
+      context: src/next-site
+      dockerfile: ../../images/portfolio/Dockerfile
+      args:
+        COMMIT_SHA: ${NEXT_COMMIT_SHA:-}
+        COMMIT_DATE: ${NEXT_COMMIT_DATE:-}
+        COMMIT_URL: ${NEXT_COMMIT_URL:-}
+    ports:
+      - 10.10.0.4:3101:3000
+    # The env of site, then the values that differ for next-site (MAINTENANCE,
+    # for example). A later file wins over an earlier one.
+    env_file:
+      - env/site.env
+      - path: env/next-site.env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+    volumes:
+      - ./data/fonts:/app/build/client/fonts:ro
+    networks: [portfolio]
+    restart: unless-stopped
+    logging: *logging
+
+  # atkuzu: the Takuzu game (SvelteKit, SQLite, atproto OAuth).
+  atkuzu:
+    image: tomplanche/atkuzu:main
+    build:
+      context: src/atkuzu
+      dockerfile: ../../images/atkuzu/Dockerfile
+      target: app
+    ports:
+      - 10.10.0.4:3102:3000
+    env_file: env/atkuzu.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: /data/atkuzu.db
+      # The dailies that atkuzu-daily writes: the app serves them from here.
+      DAILY_DIR: /data/daily
+      # Behind the Caddy of the VPS: the public URL of a request (for the OAuth
+      # login and the check of form origins) comes from its X-Forwarded-*
+      # headers.
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+    volumes:
+      # The SQLite database (the OAuth sessions and state) and daily/.
+      - ./data/atkuzu:/data
+    networks: [atkuzu]
+    restart: unless-stopped
+    logging: *logging
+
+  # A one-shot job, not a server: `just publish-daily` (or
+  # `docker compose run --rm atkuzu-daily`) writes the missing dailies of
+  # atkuzu into data/atkuzu/daily, which the app serves. Cron runs it every
+  # hour (see the README).
+  atkuzu-daily:
+    image: tomplanche/atkuzu-daily:main
+    build:
+      context: src/atkuzu
+      dockerfile: ../../images/atkuzu/Dockerfile
+      target: daily
+    profiles: [tools]
+    env_file: env/atkuzu-daily.env
+    volumes:
+      - ./data/atkuzu/daily:/app/static/daily
+    networks: [atkuzu]
+    logging: *logging
+
 networks:
   # One network per app: the containers of an app cannot reach the others.
   immich:
   paperless:
   forgejo:
   monitoring:
+  vps-back:
+  portfolio:
+  atkuzu:
 
 volumes:
   # A cache: Immich downloads the models again when it is empty.

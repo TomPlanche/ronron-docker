@@ -5,4 +5,7 @@
 # Real env files, with secrets. The env/*.env.example files are in git.
 /env/*.env
 
+# The sources of the apps, cloned by scripts/sources.sh.
+/src/
+
 .DS_Store

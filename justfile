@@ -1,5 +1,6 @@
 # ronron-docker: the Docker stack of ronron, the home server (Immich,
-# Paperless, Forgejo, Beszel agent, VictoriaMetrics and Grafana).
+# Paperless, Forgejo, Beszel agent, VictoriaMetrics and Grafana, and the apps
+# of the public sites: vps-back, site, next-site, atkuzu).
 #
 # [local] recipes run on the local machine: test the stack before a deploy.
 # [local or ronron] recipes act on the stack of ronron: over SSH from the local
@@ -30,9 +31,21 @@ stack_dir    := if on_ronron == "true" { justfile_directory() } else { ronron_di
 default:
     @"{{just_executable()}}" --justfile "{{justfile()}}" --list --unsorted
 
-# Start the stack locally, then wait for the health checks [local]
-local-up: _local-machine
-    {{local}} up -d --wait --remove-orphans immich-server paperless forgejo victoriametrics grafana
+# Clone the missing sources of the apps into src/ [local]
+init: _local-machine
+    bash scripts/sources.sh init
+
+# Update the sources of the apps to their upstream branch, force-pushes included [local]
+pull: _local-machine
+    bash scripts/sources.sh pull
+
+# Build the images of the apps: all of them, or the given services [local]
+build *services: _local-machine
+    COMPOSE="{{local}}" bash scripts/build.sh {{services}}
+
+# Build the apps and start the stack locally, then wait for the health checks [local]
+local-up: build
+    {{local}} up -d --wait --remove-orphans immich-server paperless forgejo victoriametrics grafana vps-back site next-site atkuzu
 
 # Check the local stack [local]
 local-test: _local-machine
@@ -42,7 +55,7 @@ local-test: _local-machine
     # The body of the last answer: in a file, because a font is binary.
     body=$(mktemp)
     trap 'rm -f "$body"' EXIT
-    # check <description> <expected HTTP code> <URL> [text in the body] [curl options...]
+    # check <description> <expected HTTP code> <URL> [text in the body, or !text not in it] [curl options...]
     check() {
         local description=$1 code=$2 url=$3 text=${4:-}
         shift 4 2> /dev/null || shift $#
@@ -51,7 +64,10 @@ local-test: _local-machine
         if [ "$status" != "$code" ]; then
             echo "FAIL  $description: HTTP $status, expected $code"
             failed=$((failed + 1))
-        elif [ -n "$text" ] && ! grep -qF -- "$text" "$body"; then
+        elif [ "${text#!}" != "$text" ] && grep -qF -- "${text#!}" "$body"; then
+            echo "FAIL  $description: \"${text#!}\" in the answer"
+            failed=$((failed + 1))
+        elif [ -n "$text" ] && [ "${text#!}" = "$text" ] && ! grep -qF -- "$text" "$body"; then
             echo "FAIL  $description: no \"$text\" in the answer"
             failed=$((failed + 1))
         else
@@ -72,18 +88,56 @@ local-test: _local-machine
         echo "skip  forgejo fonts: no forgejo/custom/public/assets/fonts"
     fi
     check "victoriametrics: health" 200 http://127.0.0.1:8428/health "OK"
-    check "grafana: health (database)" 200 http://127.0.0.1:3030/api/health '"database"'
+    check "grafana: health (database)" 200 http://127.0.0.1:3031/api/health '"database"'
     # The login of env/grafana.env.example.
     grafana=(-u admin:local-test-password)
-    check "grafana: data source of grafana/provisioning" 200 http://127.0.0.1:3030/api/datasources/uid/victoriametrics '"url":"http://victoriametrics:8428"' "${grafana[@]}"
-    check "grafana: dashboard of grafana/dashboards" 200 http://127.0.0.1:3030/api/dashboards/uid/hetzner-overview '"Hetzner: HTTP and security"' "${grafana[@]}"
+    check "grafana: data source of grafana/provisioning" 200 http://127.0.0.1:3031/api/datasources/uid/victoriametrics '"url":"http://victoriametrics:8428"' "${grafana[@]}"
+    check "grafana: dashboard of grafana/dashboards" 200 http://127.0.0.1:3031/api/dashboards/uid/hetzner-overview '"Hetzner: HTTP and security"' "${grafana[@]}"
     # A query through Grafana: the data source reaches VictoriaMetrics, which
     # holds its own metrics (-selfScrapeInterval).
-    check "grafana: query to victoriametrics" 200 "http://127.0.0.1:3030/api/datasources/proxy/uid/victoriametrics/api/v1/query?query=vm_app_version" '"status":"success"' "${grafana[@]}"
+    check "grafana: query to victoriametrics" 200 "http://127.0.0.1:3031/api/datasources/proxy/uid/victoriametrics/api/v1/query?query=vm_app_version" '"status":"success"' "${grafana[@]}"
+    # The apps, on their own ports. In production, the Caddy of the VPS adds the
+    # routes (tomplanche.com/api/ to vps-back, for example): the local test of
+    # hetzner-docker checks them.
+    check "vps-back: root" 200 http://127.0.0.1:8100/ "Hello"
+    # A file in the mounted static directory, served under /static/.
+    mkdir -p data/vps-back/static
+    echo "local test of /static/" > data/vps-back/static/local-test.txt
+    check "vps-back: file of data/vps-back/static" 200 http://127.0.0.1:8100/static/local-test.txt "local test of /static/"
+    check "vps-back: missing static file" 404 http://127.0.0.1:8100/static/missing.txt
+    check "site: home page" 200 http://127.0.0.1:3100/ "<html"
+    check "site: no maintenance (env/site.env)" 200 http://127.0.0.1:3100/ "!Working on cleaner deployment methods"
+    check "site: static file" 200 http://127.0.0.1:3100/_app/version.json '"version"'
+    check "site: sitemap with the last commit" 200 http://127.0.0.1:3100/sitemap.xml "<lastmod>"
+    # The maintenance page answers 503 on purpose (src/hooks.server.ts of the front).
+    check "next-site: maintenance from env/next-site.env" 503 http://127.0.0.1:3101/ "Working on cleaner deployment methods"
+    check "atkuzu: home page" 200 http://127.0.0.1:3102/ "<html"
+    check "atkuzu: static file" 200 http://127.0.0.1:3102/_app/version.json '"version"'
+    check "atkuzu: login page (form action)" 200 http://127.0.0.1:3102/login "<html"
+    if [ -f data/atkuzu/atkuzu.db ]; then
+        echo "ok    atkuzu: database in data/atkuzu (migrations at start-up)"
+    else
+        echo "FAIL  atkuzu: no data/atkuzu/atkuzu.db"
+        failed=$((failed + 1))
+    fi
+    if [ -d data/atkuzu/daily ]; then
+        today=$(TZ=Europe/Paris date +%F)
+        check "atkuzu: daily index (DAILY_DIR)" 200 http://127.0.0.1:3102/daily/index.json "$today"
+        check "atkuzu: daily of today (DAILY_DIR)" 200 "http://127.0.0.1:3102/daily/$today.json" '"puzzles"'
+        # The page loads the daily during SSR: the server must find the file too.
+        check "atkuzu: /daily renders the daily of today on the server" 200 http://127.0.0.1:3102/daily "solutionSha256"
+    else
+        echo "skip  atkuzu dailies: run just local-daily first"
+    fi
     if [ "$failed" -gt 0 ]; then
         echo "$failed check(s) failed"
         exit 1
     fi
+
+# Write the missing dailies of atkuzu into data/atkuzu/daily [local]
+local-daily: _local-machine
+    mkdir -p data/atkuzu/daily
+    {{local}} run --rm atkuzu-daily
 
 # Show the logs of the local stack [local]
 local-logs *services: _local-machine
@@ -95,7 +149,15 @@ local-down *args: _local-machine
 
 # Update this repository on ronron, pull the images, start the services: all of them, or the given ones [local or ronron]
 deploy *services: _need-ronron
-    {{on_stack}} 'cd {{stack_dir}} && git pull --ff-only && git submodule update --init && docker compose config --quiet && docker compose pull --quiet {{services}} && docker compose up -d --wait {{services}} && docker compose ps'
+    {{on_stack}} 'cd {{stack_dir}} && git pull --ff-only && git submodule update --init && docker compose config --quiet && docker compose pull --quiet --ignore-buildable {{services}} && docker compose up -d --wait {{services}} && docker compose ps'
+
+# Update this repository on ronron, build the images of apps there and start them: `just ship site next-site` [local or ronron]
+ship +services: _need-ronron
+    {{on_stack}} 'cd {{stack_dir}} && git pull --ff-only && bash scripts/ship.sh {{services}}'
+
+# Write the missing dailies of atkuzu into data/atkuzu/daily on ronron [local or ronron]
+publish-daily: _need-ronron
+    {{on_stack}} 'cd {{stack_dir}} && docker compose run --rm atkuzu-daily'
 
 # Show the services on ronron [local or ronron]
 status: _need-ronron

@@ -1,6 +1,7 @@
 # The changes of compose.yaml for a local test on the Mac: `just local-up`.
 #
 # - The env files are env/*.env.example, with test values.
+# - The images of the apps have the architecture of the Mac (`just build`).
 # - The ports listen on 127.0.0.1, with no WireGuard address. Paperless is on
 #   port 8010 and Forgejo on port 3010, so that the local test of hetzner-docker
 #   (ports 8000 and 3000) can run at the same time.
@@ -44,11 +45,42 @@ services:
     ports: !override
       - 127.0.0.1:8428:8428
 
+  # Port 3031: `just grafana-tunnel` uses 3030 for the Grafana of ronron.
   grafana:
     env_file: !override
       - env/grafana.env.example
     ports: !override
-      - 127.0.0.1:3030:3000
+      - 127.0.0.1:3031:3000
+
+  # The apps: the same ports as in production, on 127.0.0.1.
+  vps-back:
+    env_file: !override
+      - env/vps-back.env.example
+    ports: !override
+      - 127.0.0.1:8100:8000
+
+  site:
+    env_file: !override
+      - env/site.env.example
+    ports: !override
+      - 127.0.0.1:3100:3000
+
+  next-site:
+    env_file: !override
+      - env/site.env.example
+      - env/next-site.env.example
+    ports: !override
+      - 127.0.0.1:3101:3000
+
+  atkuzu:
+    env_file: !override
+      - env/atkuzu.env.example
+    ports: !override
+      - 127.0.0.1:3102:3000
+
+  atkuzu-daily:
+    env_file: !override
+      - env/atkuzu-daily.env.example
 
 volumes:
   immich-postgres-local:
