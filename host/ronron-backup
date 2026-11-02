@@ -37,8 +37,8 @@ backup_stopped() {  # backup_stopped <tag> <services> <paths...>
 }
 
 # Forgejo: the repositories, the database and the config, and the fonts of the
-# theme (not in git). contrib-worker reads Forgejo: it stops too.
-backup_stopped forgejo "forgejo contrib-worker" \
+# theme (not in git).
+backup_stopped forgejo forgejo \
   "$STACK/data/forgejo" \
   "$STACK/forgejo/custom/public/assets/fonts"
 

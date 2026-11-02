@@ -9,7 +9,7 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 | `compose.yaml` | The production stack, on the server. |
 | `compose.local.yaml` | The changes for a local test: test env files, ports on `127.0.0.1`, no GPU. |
 | `env/*.env.example` | The keys of each env file, with the values of the local test. The real `env/*.env` files exist only on the server. |
-| `forgejo/` | A git submodule: the repository [tom/forgejo](https://git.tomplanche.com/tom/forgejo), with the theme and the templates of Forgejo (`custom/`, mounted over its data through the `custom/` mechanism of Forgejo, no image build) and the script of `contrib-worker`. |
+| `forgejo/` | A git submodule: the repository [tom/forgejo](https://git.tomplanche.com/tom/forgejo), with the theme and the templates of Forgejo (`custom/`, mounted over its data through the `custom/` mechanism of Forgejo, no image build). |
 | `host/systemd/docker.service.d/after-wg.conf` | A drop-in of systemd: Docker starts after WireGuard, so the containers can bind the WireGuard address. |
 | `host/ronron-backup`, `host/systemd/ronron-backup.{service,timer}` | The nightly backup of the stack with restic (see "Backups"). |
 | `justfile` | All the commands. Run `just` to list them. |
@@ -26,7 +26,6 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 | `paperless` | `ghcr.io/paperless-ngx/paperless-ngx:3.0.5` | `10.10.0.4:8000` | `env/paperless.env` | `data/paperless/{data,media,export,consume}` |
 | `paperless-redis` | `redis:8.10.2` | none | none | the volume `paperless-redis` |
 | `forgejo` | `codeberg.org/forgejo/forgejo:16.0.4` | `0.0.0.0:3000` (web), `0.0.0.0:2222` (SSH) | none | `data/forgejo` on `/data`, `forgejo/custom/` |
-| `contrib-worker` | `ghcr.io/astral-sh/uv:0.13.4-python3.13-alpine` | none | `env/contrib-worker.env` | `data/forgejo/contrib-cache` on `/output` |
 | `beszel-agent` | `henrygd/beszel-agent-intel:0.21.1` | host network: `10.10.0.4:45876` | none | `data/beszel-agent`, the Docker socket (read only), `/dev/dri/card0` |
 
 - `10.10.0.4` is the address of the server on WireGuard (`wg0`). The VPS is `10.10.0.1`. The Caddy of the VPS sends the public names of Immich and Forgejo to `10.10.0.4`, and the VPS sends its port 2223 to port 2222 (the SSH of Forgejo). That config is not in this repository.
@@ -37,7 +36,6 @@ A Docker Compose stack for a home server: a photo library (Immich), a document a
 - Immich and its Postgres read their password from `env/immich.env`. Postgres uses it only to create a new database. The user (`postgres`) and the database (`immich`) are in `compose.yaml`.
 - The database of Paperless and of Forgejo is SQLite, in their data folder.
 - The fonts of the Forgejo theme have a license that does not allow them in a public repository. The repository forgejo ignores them: copy them into `forgejo/custom/public/assets/fonts`. Without them, the theme uses fallback fonts.
-- The heatmap of Forgejo counts the events of the instance, not the dates of the commits: a migrated repository adds nothing for its old commits. `contrib-worker` reads the history of all the repositories every minute, counts the commits of `TARGET_USER` per day, and writes the result to `data/forgejo/contrib-cache`, which Forgejo serves under `/assets/generated/`. The template `custom/templates/custom/footer.tmpl` of the submodule then puts this data in the heatmap.
 - The Beszel agent listens on WireGuard only. The Beszel hub (on the VPS) connects to it with SSH. The agent accepts only the public key of the hub (`KEY` in `compose.yaml`, not a secret). See "Monitoring".
 - Each container keeps 3 log files of 10 MB at most.
 
@@ -51,7 +49,7 @@ Requirements: Docker with Compose 2.24 or later, `just`, `curl`, and this reposi
    just local-up
    ```
 
-   The local test does not start `immich-machine-learning` (a large image), `contrib-worker` (it needs a token of Forgejo) or `beszel-agent` (it needs the hub).
+   The local test does not start `immich-machine-learning` (a large image) or `beszel-agent` (it needs the hub).
 
 2. Run the checks:
 
@@ -90,7 +88,7 @@ The server needs:
   ```
 
 - this repository in `~/ronron-docker`, with its submodule (`git clone --recurse-submodules`);
-- the env files `env/immich.env`, `env/paperless.env` and `env/contrib-worker.env`, made from `env/*.env.example` with the real values;
+- the env files `env/immich.env` and `env/paperless.env`, made from `env/*.env.example` with the real values;
 - the data of the services in `data/` (see "New server").
 
 ### The address of the server
@@ -131,7 +129,7 @@ The submodule `forgejo` points to one commit of [tom/forgejo](https://git.tompla
    git submodule update --remote forgejo && just local-up && just local-test
    ```
 
-3. Commit the new commit of the submodule (`git add forgejo`), push, then deploy: `just deploy forgejo contrib-worker`. Forgejo reads the templates at start-up, so the deploy restarts it.
+3. Commit the new commit of the submodule (`git add forgejo`), push, then deploy: `just deploy forgejo`. Forgejo reads the templates at start-up, so the deploy restarts it.
 
 ### New server
 
@@ -162,7 +160,7 @@ The agent sends the CPU, RAM, disks (the system disk and the backup disk), netwo
 | Tag | Content | Stop |
 |-----|---------|------|
 | `env` | `env/` | none |
-| `forgejo` | `data/forgejo`, the fonts of the theme | `forgejo` and `contrib-worker`, during the snapshot |
+| `forgejo` | `data/forgejo`, the fonts of the theme | `forgejo`, during the snapshot |
 | `paperless` | `data/paperless` | `paperless`, during the snapshot |
 | `immich` | `data/immich/library`, without the thumbnails and the transcoded videos (Immich makes them again) | none |
 

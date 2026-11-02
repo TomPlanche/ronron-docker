@@ -157,8 +157,6 @@ services:
       # With the fonts of the theme in custom/public/assets/fonts: the
       # repository forgejo ignores them (license), so copy them there.
       - ./forgejo/custom/public:/data/gitea/public:ro
-      # Written by contrib-worker.
-      - ./data/forgejo/contrib-cache:/data/gitea/public/assets/generated:ro
       - /etc/localtime:/etc/localtime:ro
     ports:
       # LAN and WireGuard. IPv4 only: Docker bypasses ufw, and a bare port
@@ -171,26 +169,6 @@ services:
       timeout: 5s
       start_period: 30s
     networks: [forgejo]
-    restart: unless-stopped
-    logging: *logging
-
-  # Counts the commits of TARGET_USER per day in all the repositories, from
-  # their git history, and writes the result to data/forgejo/contrib-cache. See
-  # forgejo/contrib-worker/generate_contributions.py.
-  contrib-worker:
-    image: ghcr.io/astral-sh/uv:0.13.4-python3.13-alpine
-    env_file: env/contrib-worker.env
-    environment:
-      FORGEJO_URL: http://forgejo:3000
-      TARGET_USER: tom
-      INTERVAL: "60"
-    volumes:
-      - ./forgejo/contrib-worker/generate_contributions.py:/app/generate_contributions.py:ro
-      - ./data/forgejo/contrib-cache:/output
-    command: ["uv", "run", "/app/generate_contributions.py"]
-    networks: [forgejo]
-    depends_on:
-      - forgejo
     restart: unless-stopped
     logging: *logging
 
