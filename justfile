@@ -151,9 +151,10 @@ local-down *args: _local-machine
 deploy *services: _need-ronron
     {{on_stack}} 'cd {{stack_dir}} && git pull --ff-only && git submodule update --init && docker compose config --quiet && docker compose pull --quiet --ignore-buildable {{services}} && docker compose up -d --wait {{services}} && docker compose ps'
 
-# Update this repository on ronron, build the images of apps there and start them: `just ship site next-site` [local or ronron]
+# Update this repository on ronron, build the images of apps there and start them: `just ship site next-site`. site and vps-back have a standby copy on the VPS: update it after [local or ronron]
 ship +services: _need-ronron
     {{on_stack}} 'cd {{stack_dir}} && git pull --ff-only && bash scripts/ship.sh {{services}}'
+    @case " {{services}} " in *" site "* | *" vps-back "*) echo "reminder: update the standby copies on the VPS: just standby, in hetzner-docker" ;; esac
 
 # Write the missing dailies of atkuzu into data/atkuzu/daily on ronron [local or ronron]
 publish-daily: _need-ronron

@@ -67,6 +67,7 @@ Immich also runs its machine learning container, a Valkey and a Postgres. Paperl
 - The upstream images have a fixed version. The Postgres and the Valkey of Immich also have a digest, as in the compose file of Immich.
 - ronron builds the images of my apps from their sources, with the Dockerfiles of `images/`. A new commit of an app needs no change in this repository: `just ship <service>` gets the sources and builds the image again.
 - Before each build, `just ship` tags the current image as `<image>-previous`. A rollback is one `docker tag`.
+- site and vps-back also have a standby copy on the VPS, on the same commits. When ronron does not answer, the Caddy of the VPS sends their requests to this copy ([hetzner-docker](https://git.tomplanche.com/tom/hetzner-docker)).
 
 ### Hardware
 
