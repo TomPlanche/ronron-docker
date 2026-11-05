@@ -81,11 +81,12 @@ Immich also runs its machine learning container, a Valkey and a Postgres. Paperl
 
 ### Backups
 
-- `host/ronron-backup` runs every night from a systemd timer. It saves `data/` and `env/` with restic, to a second disk.
+- `host/ronron-backup` runs every night from a systemd timer. It saves `data/` and `env/` with restic, to a second disk. Then it copies the new snapshots to a second restic repository, on a Hetzner Storage Box, outside the house.
+- So the backups follow the 3-2-1 rule: 3 copies of the data (the server, the backup disk, the Storage Box), on 2 different storage media, with 1 copy outside the house. The offsite repository has its own password.
 - The script stops Forgejo, Paperless, Grafana and atkuzu during their snapshot, so that their SQLite databases stay consistent. It starts them again, also after an error.
 - The script does not copy the files of the running Postgres. Immich writes its own database dumps every night, and the backup saves them with the library.
-- The script keeps 7 daily, 4 weekly and 6 monthly snapshots. Then it reads 1 % of the data again to check the restic repository.
-- At the end, the script sends a heartbeat to Uptime Kuma. If the heartbeat does not come, Kuma sends an alert.
+- The script keeps 7 daily, 4 weekly and 6 monthly snapshots in each repository. Then it reads 1 % of the local data and 500 MiB of the offsite data again, to check the two repositories.
+- At the end, the script sends a heartbeat to Uptime Kuma. If a step fails, the offsite copy included, the heartbeat does not come, and Kuma sends an alert.
 
 ### Fonts
 

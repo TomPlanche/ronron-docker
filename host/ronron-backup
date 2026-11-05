@@ -1,19 +1,36 @@
 #!/usr/bin/env bash
 # Nightly backup of the stack of ronron (~/ronron-docker) into the local restic
-# repository. Installed as /usr/local/sbin/ronron-backup, and run as root by
-# ronron-backup.timer (host/systemd/).
+# repository, then a copy of the new snapshots into the offsite restic
+# repository, on a Hetzner Storage Box. Installed as
+# /usr/local/sbin/ronron-backup, and run as root by ronron-backup.timer
+# (host/systemd/).
 set -euo pipefail
 
 export RESTIC_REPOSITORY=/srv/backup/restic
 export RESTIC_PASSWORD_FILE=/root/.restic-password
+
+# The offsite repository. "storagebox" is a Host of /root/.ssh/config: the
+# address and the user of the Storage Box are not in this public repository.
+# This repository has its own password. Keep a copy of it outside the house:
+# after the loss of ronron, it is the only way to read the offsite copy.
+OFFSITE_REPOSITORY=sftp:storagebox:restic
+OFFSITE_PASSWORD_FILE=/root/.restic-password-offsite
 
 STACK=/home/tomplanche/ronron-docker
 # The push URL of the monitor in Uptime Kuma, without the query: it holds a
 # token, so it is in a file of root, not in this public repository.
 KUMA_PUSH_URL_FILE=/root/.kuma-push-url
 
+# The same retention in the two repositories: 7 daily, 4 weekly, 6 monthly
+# snapshots.
+RETENTION=(--keep-daily 7 --keep-weekly 4 --keep-monthly 6)
+
 compose() {
     docker compose -f "$STACK/compose.yaml" "$@"
+}
+
+offsite() {
+    restic -r "$OFFSITE_REPOSITORY" --password-file "$OFFSITE_PASSWORD_FILE" "$@"
 }
 
 # With "nofail", a missing disk leaves an empty mountpoint on the root fs.
@@ -64,13 +81,22 @@ restic backup --tag immich \
   --exclude "$STACK/data/immich/library/encoded-video" \
   "$STACK/data/immich/library"
 
-# Retention: 7 daily, 4 weekly, 6 monthly snapshots.
-restic forget --prune --keep-daily 7 --keep-weekly 4 --keep-monthly 6
+restic forget --prune "${RETENTION[@]}"
 
 # Verify repository structure and re-read a random 1% of the data.
 restic check --read-data-subset=1%
 
-# Heartbeat to Uptime Kuma: only reached if every step above succeeded (set -e).
+# Offsite: copy the snapshots that the Storage Box does not have yet. The check
+# above runs first, so only checked data leaves the house. The first copy
+# sends all the repository (several hours); the next ones only the new data.
+offsite copy --from-repo "$RESTIC_REPOSITORY" --from-password-file "$RESTIC_PASSWORD_FILE"
+offsite forget --prune "${RETENTION[@]}"
+
+# Re-read 500 MiB of the offsite data: 1% is about 1.5 GiB to download each night.
+offsite check --read-data-subset=500M
+
+# Heartbeat to Uptime Kuma: only reached if every step above succeeded (set -e),
+# the offsite copy included.
 if [ -r "$KUMA_PUSH_URL_FILE" ]; then
     curl -fsS -m 10 --retry 3 "$(cat "$KUMA_PUSH_URL_FILE")?status=up&msg=OK" > /dev/null || true
 fi
