@@ -17,6 +17,8 @@ OFFSITE_REPOSITORY=sftp:storagebox:restic
 OFFSITE_PASSWORD_FILE=/root/.restic-password-offsite
 
 STACK=/home/tomplanche/ronron-docker
+# The Tangled knot: its own Compose project, outside this repository.
+TANGLED=/home/tomplanche/tangled
 # The push URL of the monitor in Uptime Kuma, without the query: it holds a
 # token, so it is in a file of root, not in this public repository.
 KUMA_PUSH_URL_FILE=/root/.kuma-push-url
@@ -73,6 +75,20 @@ backup_stopped apps atkuzu \
   "$STACK/data/atkuzu" \
   "$STACK/data/vps-back" \
   "$STACK/data/fonts"
+
+# The Tangled knot: the repositories, the sealed keys, the SSH host key, the
+# LFS objects, and knot.env (the master key, which the sealed keys need). Stop
+# it like the services above. Skip it while ~/tangled does not exist.
+if [ -f "$TANGLED/compose.yaml" ]; then
+    docker compose -f "$TANGLED/compose.yaml" stop knot
+    trap 'docker compose -f "$TANGLED/compose.yaml" start knot' EXIT
+    restic backup --tag knot \
+      "$TANGLED/data" \
+      "$TANGLED/knot.env" \
+      "$TANGLED/config.toml"
+    docker compose -f "$TANGLED/compose.yaml" start knot
+    trap - EXIT
+fi
 
 # Immich: originals + automatic DB dumps (library/backups).
 # Live postgres files are inconsistent while running; thumbs and transcodes are regenerable.
