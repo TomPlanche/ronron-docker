@@ -480,11 +480,16 @@ networks:
   portfolio:
   atkuzu:
   # Forgejo, forgejo-runner and forgejo-runner-dind. A fixed subnet, for the
-  # fixed addresses of forgejo and forgejo-runner.
+  # fixed addresses of forgejo and forgejo-runner. Docker gives the other
+  # addresses from ip_range only, so it cannot give a fixed address to another
+  # container (forgejo-runner-dind before forgejo, for example, after a reboot).
   forgejo-runner:
     ipam:
       config:
         - subnet: 172.30.250.0/24
+          ip_range: 172.30.250.128/25
+          # Else Docker takes the first address of ip_range.
+          gateway: 172.30.250.1
 
 volumes:
   # A cache: Immich downloads the models again when it is empty.
