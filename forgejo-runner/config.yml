@@ -18,8 +18,8 @@ runner:
   timeout: 1h
   # A deploy stops the runner: the jobs that run at that time are cancelled.
   shutdown_timeout: 0s
-  # The runner asks Forgejo for jobs on the internal network, not through the
-  # Caddy of the VPS.
+  # The runner asks Forgejo for jobs on the network forgejo-runner, not through
+  # the Caddy of the VPS.
   fetch_interval: 5s
   # The `runs-on` names that this runner accepts, and the image of the job
   # container for each name. node:24-trixie has git, curl, gcc and node (for the
@@ -41,6 +41,11 @@ container:
   # Each job gets its own network in forgejo-runner-dind.
   network: ""
   privileged: false
+  # The jobs clone the repositories from the URL of the runner,
+  # http://forgejo:3000 (server.connections). The name forgejo does not resolve
+  # in forgejo-runner-dind: this is the fixed address of Forgejo on the network
+  # forgejo-runner (compose.yaml).
+  options: --add-host=forgejo:172.30.250.2
   # No Docker socket in the job containers: a job cannot start containers.
   docker_host: "-"
   valid_volumes: []

@@ -176,15 +176,23 @@ services:
       interval: 60s
       timeout: 5s
       start_period: 30s
-    networks: [forgejo]
+    networks:
+      forgejo: {}
+      forgejo-runner:
+        # A fixed address: the jobs clone the repositories from
+        # http://forgejo:3000, the URL of the runner, and the name forgejo
+        # does not resolve in forgejo-runner-dind. container.options of
+        # forgejo-runner/config.yml gives them this address.
+        ipv4_address: 172.30.250.2
     restart: unless-stopped
     logging: *logging
 
   # The runner of Forgejo Actions: it runs the jobs of the workflows (CI). Its
   # config is forgejo-runner/config.yml, its token data/forgejo-runner/token
-  # (`just runner-register`). It asks Forgejo for jobs on the network forgejo,
-  # and it starts each job in a container of forgejo-runner-dind, not of the
-  # Docker of ronron: a job cannot see the other containers or their data.
+  # (`just runner-register`). It asks Forgejo for jobs on the network
+  # forgejo-runner, and it starts each job in a container of
+  # forgejo-runner-dind, not of the Docker of ronron: a job cannot see the
+  # other containers or their data.
   forgejo-runner:
     image: data.forgejo.org/forgejo/runner:13.2.1
     command: ["forgejo-runner", "daemon", "--config", "/etc/forgejo-runner/config.yml"]
@@ -203,7 +211,6 @@ services:
       forgejo-runner-dind:
         condition: service_healthy
     networks:
-      forgejo: {}
       forgejo-runner:
         # A fixed address: the jobs reach the cache of the runner there
         # (cache.host in forgejo-runner/config.yml).
@@ -472,8 +479,8 @@ networks:
   vps-back:
   portfolio:
   atkuzu:
-  # forgejo-runner and forgejo-runner-dind. A fixed subnet, for the fixed
-  # address of forgejo-runner.
+  # Forgejo, forgejo-runner and forgejo-runner-dind. A fixed subnet, for the
+  # fixed addresses of forgejo and forgejo-runner.
   forgejo-runner:
     ipam:
       config:
