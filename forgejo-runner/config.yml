@@ -1,0 +1,56 @@
+# The config of forgejo-runner, the runner of Forgejo Actions (see compose.yaml).
+# `forgejo-runner generate-config` gives all the keys, with their comments.
+#
+# The token of the runner is not here: it is in data/forgejo-runner/token (not
+# in git). `just runner-register` makes it and registers the runner in Forgejo.
+
+log:
+  level: info
+  job_level: info
+
+runner:
+  # Not used: the connection is in `server.connections`. An absolute path keeps
+  # the file out of the working directory.
+  file: /data/.runner
+  # 2 jobs at the same time. The jobs run in forgejo-runner-dind, which has the
+  # CPU and memory limits (compose.yaml).
+  capacity: 2
+  timeout: 1h
+  # A deploy stops the runner: the jobs that run at that time are cancelled.
+  shutdown_timeout: 0s
+  # The runner asks Forgejo for jobs on the internal network, not through the
+  # Caddy of the VPS.
+  fetch_interval: 5s
+  # The `runs-on` names that this runner accepts, and the image of the job
+  # container for each name. node:24-trixie has git, curl, gcc and node (for the
+  # JavaScript actions). The jobs for macos-latest or windows-latest wait: no
+  # runner has these labels.
+  labels:
+    - docker:docker://node:24-trixie
+    - ubuntu-latest:docker://node:24-trixie
+
+cache:
+  enabled: true
+  dir: /data/cache
+  # The job containers run in forgejo-runner-dind: they reach the cache of the
+  # runner through the network forgejo-runner, at the fixed address of the
+  # runner (compose.yaml). The name forgejo-runner does not resolve there.
+  host: 172.30.250.10
+
+container:
+  # Each job gets its own network in forgejo-runner-dind.
+  network: ""
+  privileged: false
+  # No Docker socket in the job containers: a job cannot start containers.
+  docker_host: "-"
+  valid_volumes: []
+
+server:
+  connections:
+    forgejo:
+      url: http://forgejo:3000/
+      # The uuid is the first 16 characters of the token, in hexadecimal ASCII:
+      # an identifier, not a secret. The other 24 characters of the token are
+      # the secret. `just runner-register` uses the same 16 characters.
+      uuid: 38366637-6338-6138-3663-336366653636
+      token_url: file:/data/token

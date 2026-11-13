@@ -126,6 +126,12 @@ services:
 
       FORGEJO__database__DB_TYPE: sqlite3
 
+      # Forgejo Actions: a `uses:` without a full URL (actions/checkout@v4,
+      # for example) comes from GitHub, as on GitHub. The default,
+      # data.forgejo.org, does not have dtolnay/rust-toolchain or
+      # Swatinem/rust-cache.
+      FORGEJO__actions__DEFAULT_ACTIONS_URL: https://github.com
+
       # The default MIGRATE timeout (600 s) is too short for large repositories
       # (zed, typst-packages, for example): they are cloned partway, then
       # deleted. MIRROR covers the periodic resync of the same repositories.
@@ -171,6 +177,65 @@ services:
       timeout: 5s
       start_period: 30s
     networks: [forgejo]
+    restart: unless-stopped
+    logging: *logging
+
+  # The runner of Forgejo Actions: it runs the jobs of the workflows (CI). Its
+  # config is forgejo-runner/config.yml, its token data/forgejo-runner/token
+  # (`just runner-register`). It asks Forgejo for jobs on the network forgejo,
+  # and it starts each job in a container of forgejo-runner-dind, not of the
+  # Docker of ronron: a job cannot see the other containers or their data.
+  forgejo-runner:
+    image: data.forgejo.org/forgejo/runner:13.2.1
+    command: ["forgejo-runner", "daemon", "--config", "/etc/forgejo-runner/config.yml"]
+    # The image runs as uid 1000: the owner of data/forgejo-runner. The group
+    # 1000 can use the Docker socket of forgejo-runner-dind (--group 1000).
+    environment:
+      DOCKER_HOST: unix:///run/dind/docker.sock
+    volumes:
+      # The token and the cache of the actions (actions/cache, rust-cache).
+      - ./data/forgejo-runner:/data
+      - ./forgejo-runner/config.yml:/etc/forgejo-runner/config.yml:ro
+      - forgejo-runner-socket:/run/dind
+    depends_on:
+      forgejo:
+        condition: service_started
+      forgejo-runner-dind:
+        condition: service_healthy
+    networks:
+      forgejo: {}
+      forgejo-runner:
+        # A fixed address: the jobs reach the cache of the runner there
+        # (cache.host in forgejo-runner/config.yml).
+        ipv4_address: 172.30.250.10
+    restart: unless-stopped
+    logging: *logging
+
+  # A Docker daemon for the jobs only (Docker-in-Docker). Privileged: Docker
+  # needs it to start containers. It listens only on a socket in the volume
+  # forgejo-runner-socket, which only forgejo-runner mounts: the jobs cannot
+  # reach it over the network. The limits apply to all the jobs together.
+  forgejo-runner-dind:
+    image: docker:29.9.2-dind
+    privileged: true
+    command: ["dockerd", "--host=unix:///run/dind/docker.sock", "--group=1000"]
+    environment:
+      # No TLS certificates: there is no TCP port.
+      DOCKER_TLS_CERTDIR: ""
+    volumes:
+      - forgejo-runner-socket:/run/dind
+      # The images of the jobs (node:24-trixie, for example), kept between
+      # restarts.
+      - forgejo-runner-docker:/var/lib/docker
+    cpus: 8
+    mem_limit: 12g
+    healthcheck:
+      test: ["CMD", "docker", "--host=unix:///run/dind/docker.sock", "info"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      start_interval: 2s
+    networks: [forgejo-runner]
     restart: unless-stopped
     logging: *logging
 
@@ -407,9 +472,20 @@ networks:
   vps-back:
   portfolio:
   atkuzu:
+  # forgejo-runner and forgejo-runner-dind. A fixed subnet, for the fixed
+  # address of forgejo-runner.
+  forgejo-runner:
+    ipam:
+      config:
+        - subnet: 172.30.250.0/24
 
 volumes:
   # A cache: Immich downloads the models again when it is empty.
   immich-model-cache:
   # The task queue of Paperless.
   paperless-redis:
+  # The Docker socket of forgejo-runner-dind, for forgejo-runner.
+  forgejo-runner-socket:
+  # The images and containers of the jobs. A cache: Docker downloads the
+  # images again when it is empty.
+  forgejo-runner-docker:

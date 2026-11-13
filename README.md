@@ -20,6 +20,7 @@ flowchart LR
     apps["vps-back, site, next-site, atkuzu"]
     immich[Immich]
     forgejo[Forgejo]
+    runner["Forgejo runner, Docker-in-Docker"]
     paperless[Paperless-ngx]
     agent[Beszel agent]
     vm[VictoriaMetrics]
@@ -33,6 +34,7 @@ flowchart LR
   hub -->|"SSH over WireGuard"| agent
   vmagent -->|"remote write over WireGuard"| vm
   vm --> grafana
+  runner -->|"asks for jobs"| forgejo
 ```
 
 ## Services
@@ -42,6 +44,7 @@ flowchart LR
 | [Immich](https://immich.app) | The photo and video library. | Public, through the VPS. LAN. |
 | [Paperless-ngx](https://docs.paperless-ngx.com) | The document archive. | WireGuard only. |
 | [Forgejo](https://forgejo.org) | The git server ([git.tomplanche.com](https://git.tomplanche.com)), with my theme. | Public, through the VPS (web and SSH). LAN. |
+| [Forgejo Runner](https://forgejo.org/docs/latest/admin/actions/) | Runs the jobs of the Forgejo Actions workflows (CI), in containers of its own Docker-in-Docker. | None: it connects to Forgejo. |
 | [Beszel](https://beszel.dev) agent | Sends the CPU, RAM, disk, network, temperature, GPU and container stats of ronron to the Beszel hub. | WireGuard only. |
 | [VictoriaMetrics](https://victoriametrics.com) | Stores the metrics that vmagent sends, for 1 year. | WireGuard only. |
 | [Grafana](https://grafana.com) | Shows the metrics. | WireGuard only. |
@@ -68,6 +71,14 @@ Immich also runs its machine learning container, a Valkey and a Postgres. Paperl
 - ronron builds the images of my apps from their sources, with the Dockerfiles of `images/`. A new commit of an app needs no change in this repository: `just ship <service>` gets the sources and builds the image again.
 - Before each build, `just ship` tags the current image as `<image>-previous`. A rollback is one `docker tag`.
 - site and vps-back also have a standby copy on the VPS, on the same commits. When ronron does not answer, the Caddy of the VPS sends their requests to this copy ([hetzner-docker](https://git.tomplanche.com/tom/hetzner-docker)).
+
+### CI
+
+- The Forgejo runner asks Forgejo for jobs on their Docker network, not through the VPS. Its config is `forgejo-runner/config.yml`. Its token is not in git.
+- The jobs run in containers of a separate Docker daemon (Docker-in-Docker), not in the Docker of ronron. So a job cannot see the containers of ronron or their data. The jobs get no Docker socket.
+- This daemon listens only on a Unix socket, in a volume that only the runner mounts. The jobs cannot reach it over the network.
+- The CPU and memory limits of this daemon apply to all the jobs together, so the CI cannot take all of ronron.
+- The runner accepts the labels `docker` and `ubuntu-latest`, with the image `node:24-trixie`. A `uses:` without a full URL comes from GitHub.
 
 ### Hardware
 
@@ -105,8 +116,9 @@ The fonts of the site and of the Forgejo theme have a license that does not allo
 | `compose.local.yaml` | The changes for the local test. |
 | `justfile` | All the commands. `just` lists them. |
 | `images/` | One Dockerfile for each of my apps. |
-| `scripts/` | The scripts that clone the sources of the apps, build their images and ship them. |
+| `scripts/` | The scripts that clone the sources of the apps, build their images and ship them, and the script that registers the Forgejo runner. |
 | `forgejo/` | A git submodule: [tom/forgejo](https://git.tomplanche.com/tom/forgejo), the theme and the templates of Forgejo. |
+| `forgejo-runner/` | The config of the Forgejo runner. |
 | `grafana/` | The data source and the dashboards of Grafana. |
 | `host/` | The files for the host: the systemd drop-in of Docker, the backup script and its units. |
 | `env/*.env.example` | The keys of each env file. The real env files are not in git. |

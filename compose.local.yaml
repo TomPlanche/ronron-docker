@@ -6,8 +6,8 @@
 #   port 8010 and Forgejo on port 3010, so that the local test of hetzner-docker
 #   (ports 8000 and 3000) can run at the same time.
 # - No Intel GPU: Immich transcodes on the CPU.
-# - immich-machine-learning (a large image) and beszel-agent (it needs the hub)
-#   do not start.
+# - immich-machine-learning (a large image), beszel-agent (it needs the hub)
+#   and forgejo-runner (it needs a token registered in Forgejo) do not start.
 
 services:
   immich-server:

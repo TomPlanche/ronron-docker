@@ -156,6 +156,10 @@ ship +services: _need-ronron
     {{on_stack}} 'cd {{stack_dir}} && git pull --ff-only && bash scripts/ship.sh {{services}}'
     @case " {{services}} " in *" site "* | *" vps-back "*) echo "reminder: update the standby copies on the VPS: just standby, in hetzner-docker" ;; esac
 
+# Make the token of forgejo-runner if it is missing, and register the runner in Forgejo [local or ronron]
+runner-register: _need-ronron
+    {{on_stack}} 'cd {{stack_dir}} && git pull --ff-only && bash scripts/runner-register.sh'
+
 # Write the missing dailies of atkuzu into data/atkuzu/daily on ronron [local or ronron]
 publish-daily: _need-ronron
     {{on_stack}} 'cd {{stack_dir}} && docker compose run --rm atkuzu-daily'
