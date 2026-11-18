@@ -27,7 +27,7 @@ services:
   # Immich: the photos. Hardware transcoding (Quick Sync) and machine learning
   # (OpenVINO) on the Intel iGPU.
   immich-server:
-    image: ghcr.io/immich-app/immich-server:v3.3.5
+    image: ghcr.io/immich-app/immich-server:v3.4.1
     env_file: env/immich.env
     # These values win over the env file.
     environment:
@@ -52,7 +52,7 @@ services:
     logging: *logging
 
   immich-machine-learning:
-    image: ghcr.io/immich-app/immich-machine-learning:v3.3.5-openvino
+    image: ghcr.io/immich-app/immich-machine-learning:v3.4.1-openvino
     devices:
       - /dev/dri:/dev/dri
     volumes:
@@ -88,7 +88,7 @@ services:
 
   # Paperless-ngx: the documents. Its database is SQLite, in data/paperless/data.
   paperless:
-    image: ghcr.io/paperless-ngx/paperless-ngx:3.0.5
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.5.1
     env_file: env/paperless.env
     environment:
       PAPERLESS_REDIS: redis://paperless-redis:6379
@@ -107,7 +107,7 @@ services:
     logging: *logging
 
   paperless-redis:
-    image: docker.io/library/redis:8.10.2
+    image: docker.io/library/redis:8.10.3
     volumes:
       - paperless-redis:/data
     healthcheck:
@@ -120,7 +120,7 @@ services:
   # submodule forgejo, repository tom/forgejo) go over the data volume, through
   # the custom/ mechanism of Forgejo: no image build.
   forgejo:
-    image: codeberg.org/forgejo/forgejo:16.0.4
+    image: codeberg.org/forgejo/forgejo:17.0.1
     environment:
       USER_UID: 1000
       USER_GID: 1000
@@ -224,7 +224,7 @@ services:
   # forgejo-runner-socket, which only forgejo-runner mounts: the jobs cannot
   # reach it over the network. The limits apply to all the jobs together.
   forgejo-runner-dind:
-    image: docker:29.9.2-dind
+    image: docker:29.10.0-dind
     privileged: true
     command: ["dockerd", "--host=unix:///run/dind/docker.sock", "--group=1000"]
     environment:
@@ -255,7 +255,7 @@ services:
   beszel-agent:
     # The same version as the hub. The Intel variant contains intel_gpu_top,
     # which reads the iGPU (i915 driver).
-    image: henrygd/beszel-agent-intel:0.21.1
+    image: henrygd/beszel-agent-intel:0.21.2
     # Host network: the agent reads the network of the host, and it listens on
     # the WireGuard address of ronron.
     network_mode: host
@@ -290,7 +290,7 @@ services:
   # vmagent of the Hetzner VPS sends its metrics here over WireGuard, and
   # Grafana reads them. It also keeps its own metrics (-selfScrapeInterval).
   victoriametrics:
-    image: victoriametrics/victoria-metrics:v1.154.0
+    image: victoriametrics/victoria-metrics:v1.156.0
     command:
       - -storageDataPath=/storage
       - -retentionPeriod=1y
@@ -314,7 +314,7 @@ services:
   # come from grafana/ (provisioning). The users and the dashboards made in the
   # UI are in data/grafana.
   grafana:
-    image: grafana/grafana:13.2.4
+    image: grafana/grafana:13.3.1
     # The owner of data/grafana: make the folder before the first start, else
     # Docker makes it for root and Grafana cannot write to it.
     user: "1000:1000"
