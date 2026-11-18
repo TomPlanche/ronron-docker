@@ -149,6 +149,10 @@ local-hairball *args: _local-machine
     mkdir -p data/hairball data/vps-back/static/hairball
     {{local}} run --rm hairball hairball-sync {{args}}
 
+# Show the new versions of the upstream images. `--write` puts the new versions of the same major into compose.yaml. Names limit the check: `just updates --write forgejo immich` [local]
+updates *args: _local-machine
+    python3 scripts/check-updates.py {{args}}
+
 # Show the logs of the local stack [local]
 local-logs *services: _local-machine
     {{local}} logs -f {{services}}
