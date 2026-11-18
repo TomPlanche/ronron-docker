@@ -25,11 +25,12 @@ done
 
 bash scripts/build.sh "$@"
 
-# atkuzu-daily is a job, not a server: cron and `just publish-daily` run it.
+# atkuzu-daily and hairball are jobs, not servers: cron and their recipes run
+# them.
 servers=()
 for service in "$@"; do
     case "$service" in
-        atkuzu-daily) ;;
+        atkuzu-daily | hairball) ;;
         *) servers+=("$service") ;;
     esac
 done

@@ -1,7 +1,8 @@
 # Production stack of ronron, the home server (Debian, x86_64).
 #
-# The images of the apps (vps-back, site, next-site, atkuzu) are built on
-# ronron, from the sources in src/ and the Dockerfiles in images/ (`just ship`).
+# The images of the apps (vps-back, site, next-site, atkuzu, hairball) are
+# built on ronron, from the sources in src/ and the Dockerfiles in images/
+# (`just ship`).
 # All the other images come from their upstream registry. Test this stack
 # locally with `just local-up`, which adds compose.local.yaml on top of this
 # file.
@@ -470,6 +471,27 @@ services:
     networks: [atkuzu]
     logging: *logging
 
+  # hairball: a job, not a server. Each run reads my public activity (ATProto,
+  # GitHub, Last.fm) into data/hairball/hairball.db, then writes the calendar
+  # JSON into data/vps-back/static/hairball: vps-back serves it under
+  # /static/hairball/calendar.json. The config is hairball/config.toml. Cron
+  # runs an incremental sync every 15 minutes and a full sync every 6 hours
+  # (`hairball-sync --full`). A lock in data/hairball lets only one sync run
+  # at a time.
+  hairball:
+    image: tomplanche/hairball:main
+    build:
+      context: src/hairball
+      dockerfile: ../../images/hairball/Dockerfile
+    profiles: [tools]
+    env_file: env/hairball.env
+    volumes:
+      - ./hairball/config.toml:/etc/hairball/config.toml:ro
+      - ./data/hairball:/data
+      - ./data/vps-back/static/hairball:/export
+    networks: [hairball]
+    logging: *logging
+
 networks:
   # One network per app: the containers of an app cannot reach the others.
   immich:
@@ -479,6 +501,7 @@ networks:
   vps-back:
   portfolio:
   atkuzu:
+  hairball:
   # Forgejo, forgejo-runner and forgejo-runner-dind. A fixed subnet, for the
   # fixed addresses of forgejo and forgejo-runner. Docker gives the other
   # addresses from ip_range only, so it cannot give a fixed address to another

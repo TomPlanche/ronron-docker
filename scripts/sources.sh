@@ -23,6 +23,7 @@ init() {
     clone vps-back https://github.com/TomPlanche/vps-back.git main
     clone site https://github.com/TomPlanche/portfolio-v222.git main
     clone atkuzu https://tangled.org/tomplanche.com/atkuzu main
+    clone hairball https://git.tomplanche.com/tom/hairball.git main
     # next-site: the next branch of the front, as a git worktree of src/site.
     if [ -e src/next-site ]; then
         echo "ok     src/next-site"

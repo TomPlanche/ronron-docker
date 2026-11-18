@@ -76,6 +76,15 @@ backup_stopped apps atkuzu \
   "$STACK/data/vps-back" \
   "$STACK/data/fonts"
 
+# hairball: its SQLite database. No stop: take the lock of the job instead, so
+# no sync writes during the snapshot. The lock waits for a running sync, 1
+# hour at most (the timeout of the job). Skip it until the first run of the
+# job: else flock makes the lock file for root, and the job cannot open it.
+if [ -f "$STACK/data/hairball/hairball.lock" ]; then
+    flock "$STACK/data/hairball/hairball.lock" \
+      restic backup --tag hairball "$STACK/data/hairball"
+fi
+
 # The Tangled knot: the repositories, the sealed keys, the SSH host key, the
 # LFS objects, and knot.env (the master key, which the sealed keys need). Stop
 # it like the services above. Skip it while ~/tangled does not exist.

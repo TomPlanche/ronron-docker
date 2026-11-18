@@ -21,7 +21,7 @@ commit() {  # commit <variable prefix> <source directory>
 commit SITE src/site
 commit NEXT src/next-site
 
-# --profile tools: atkuzu-daily is in that profile. Without a service, Compose
+# --profile tools: atkuzu-daily and hairball are in that profile. Without a service, Compose
 # builds each service with a build section: the apps only.
 # shellcheck disable=SC2086
 $compose --profile tools build "$@"

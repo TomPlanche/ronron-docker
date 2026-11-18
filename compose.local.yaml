@@ -82,5 +82,9 @@ services:
     env_file: !override
       - env/atkuzu-daily.env.example
 
+  hairball:
+    env_file: !override
+      - env/hairball.env.example
+
 volumes:
   immich-postgres-local:

@@ -53,6 +53,7 @@ flowchart LR
 | [next-site](https://github.com/TomPlanche/portfolio-v222) | The same portfolio, branch `next`. | `next.tomplanche.com` |
 | [atkuzu](https://tangled.org/tomplanche.com/atkuzu) | A Takuzu game with a daily puzzle (SvelteKit, SQLite, atproto OAuth). | `atkuzu.tomplanche.com` |
 | atkuzu-daily | A job that writes the daily puzzles of atkuzu. Cron runs it every hour. | None. |
+| [hairball](https://git.tomplanche.com/tom/hairball) | A job that collects my public activity (ATProto, GitHub, Last.fm) into SQLite, then writes the JSON of a calendar heatmap. Cron runs an incremental sync every 15 minutes and a full sync every 6 hours. | None. vps-back serves the calendar under `/static/hairball/`. |
 
 Immich also runs its machine learning container, a Valkey and a Postgres. Paperless also runs a Redis.
 
@@ -96,6 +97,7 @@ Immich also runs its machine learning container, a Valkey and a Postgres. Paperl
 - `host/ronron-backup` runs every night from a systemd timer. It saves `data/` and `env/` with restic, to a second disk. Then it copies the new snapshots to a second restic repository, on a Hetzner Storage Box, outside the house.
 - So the backups follow the 3-2-1 rule: 3 copies of the data (the server, the backup disk, the Storage Box), on 2 different storage media, with 1 copy outside the house. The offsite repository has its own password.
 - The script stops Forgejo, Paperless, Grafana and atkuzu during their snapshot, so that their SQLite databases stay consistent. It starts them again, also after an error.
+- The script does not stop hairball. It takes the lock of the hairball job, so that no sync writes to its SQLite database during the snapshot.
 - The script does not copy the files of the running Postgres. Immich writes its own database dumps every night, and the backup saves them with the library.
 - The script keeps 7 daily, 4 weekly and 6 monthly snapshots in each repository. Then it reads 1 % of the local data and 500 MiB of the offsite data again, to check the two repositories.
 - At the end, the script sends a heartbeat to Uptime Kuma. If a step fails, the offsite copy included, the heartbeat does not come, and Kuma sends an alert.
@@ -120,6 +122,7 @@ The fonts of the site and of the Forgejo theme have a license that does not allo
 | `forgejo/` | A git submodule: [tom/forgejo](https://git.tomplanche.com/tom/forgejo), the theme and the templates of Forgejo. |
 | `forgejo-runner/` | The config of the Forgejo runner. |
 | `grafana/` | The data source and the dashboards of Grafana. |
+| `hairball/` | The config of hairball. It holds no secret. |
 | `host/` | The files for the host: the systemd drop-in of Docker, the backup script and its units. |
 | `env/*.env.example` | The keys of each env file. The real env files are not in git. |
 
@@ -129,4 +132,4 @@ The fonts of the site and of the Forgejo theme have a license that does not allo
 
 - [hetzner-docker](https://git.tomplanche.com/tom/hetzner-docker): the stack of the VPS: the sites of Caddy, the Beszel hub and vmagent.
 - [tom/forgejo](https://git.tomplanche.com/tom/forgejo): the theme of Forgejo.
-- [vps-back](https://github.com/TomPlanche/vps-back), [portfolio-v222](https://github.com/TomPlanche/portfolio-v222), [atkuzu](https://tangled.org/tomplanche.com/atkuzu): the apps.
+- [vps-back](https://github.com/TomPlanche/vps-back), [portfolio-v222](https://github.com/TomPlanche/portfolio-v222), [atkuzu](https://tangled.org/tomplanche.com/atkuzu), [hairball](https://git.tomplanche.com/tom/hairball): the apps.

@@ -1,6 +1,6 @@
 # ronron-docker: the Docker stack of ronron, the home server (Immich,
 # Paperless, Forgejo, Beszel agent, VictoriaMetrics and Grafana, and the apps
-# of the public sites: vps-back, site, next-site, atkuzu).
+# of the public sites: vps-back, site, next-site, atkuzu, hairball).
 #
 # [local] recipes run on the local machine: test the stack before a deploy.
 # [local or ronron] recipes act on the stack of ronron: over SSH from the local
@@ -129,6 +129,11 @@ local-test: _local-machine
     else
         echo "skip  atkuzu dailies: run just local-daily first"
     fi
+    if [ -f data/vps-back/static/hairball/calendar.json ]; then
+        check "vps-back: calendar of hairball (data/vps-back/static/hairball)" 200 http://127.0.0.1:8100/static/hairball/calendar.json '"days"'
+    else
+        echo "skip  hairball calendar: run just local-hairball first"
+    fi
     if [ "$failed" -gt 0 ]; then
         echo "$failed check(s) failed"
         exit 1
@@ -138,6 +143,11 @@ local-test: _local-machine
 local-daily: _local-machine
     mkdir -p data/atkuzu/daily
     {{local}} run --rm atkuzu-daily
+
+# Run a sync of hairball, then its export into data/vps-back/static/hairball: `just local-hairball`, or `just local-hairball --full` [local]
+local-hairball *args: _local-machine
+    mkdir -p data/hairball data/vps-back/static/hairball
+    {{local}} run --rm hairball hairball-sync {{args}}
 
 # Show the logs of the local stack [local]
 local-logs *services: _local-machine
@@ -163,6 +173,14 @@ runner-register: _need-ronron
 # Write the missing dailies of atkuzu into data/atkuzu/daily on ronron [local or ronron]
 publish-daily: _need-ronron
     {{on_stack}} 'cd {{stack_dir}} && docker compose run --rm atkuzu-daily'
+
+# Run a sync of hairball on ronron now, then its export: `just hairball`, or `just hairball --full` [local or ronron]
+hairball *args: _need-ronron
+    {{on_stack}} 'cd {{stack_dir}} && docker compose run --rm hairball hairball-sync {{args}}'
+
+# Show the sources of hairball on ronron: last run, cursor and row counts [local or ronron]
+hairball-status: _need-ronron
+    {{on_stack}} 'cd {{stack_dir}} && docker compose run --rm hairball hairball status'
 
 # Show the services on ronron [local or ronron]
 status: _need-ronron

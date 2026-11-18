@@ -1,0 +1,37 @@
+# The config of hairball, mounted on /etc/hairball/config.toml. It holds no
+# secret: only the names of the environment variables of env/hairball.env.
+# See config.example.toml in https://git.tomplanche.com/tom/hairball for all
+# the options.
+
+timezone = "Europe/Paris"
+# data/hairball on the server.
+database = "/data/hairball.db"
+
+# data/vps-back/static/hairball on the server: vps-back serves the file under
+# /static/hairball/calendar.json.
+[export]
+out = "/export/calendar.json"
+
+# ATProto: no credentials. The CLI reads the public records of the repo.
+[atproto]
+handle = "tomplanche.com"
+exclude = ["app.bsky.graph.follow", "app.rocksky.*", "fm.teal.feed.play"]
+
+[atproto.bluesky]
+posts = true      # app.bsky.feed.post
+likes = true      # app.bsky.feed.like
+reposts = false   # app.bsky.feed.repost
+
+# The bookmarks need an app password (BSKY_APP_PASSWORD).
+[bsky_bookmarks]
+enabled = false
+identifier = "tomplanche.com"
+app_password_env = "BSKY_APP_PASSWORD"
+
+[github]
+user = "TomPlanche"
+token_env = "GITHUB_TOKEN"
+
+[lastfm]
+user = "tom_planche"
+api_key_env = "LASTFM_API_KEY"
