@@ -393,9 +393,15 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: "3000"
+      # A path in the container, not on ronron: see the hairball mount below.
+      ACTIVITY_CALENDAR_FILE: /srv/hairball/calendar.json
     volumes:
       # The fonts of the site: their license keeps them out of the image.
       - ./data/fonts:/app/build/client/fonts:ro
+      # The calendar export of hairball, for the /activity page. The mount is
+      # the folder, not the file: a mount of one file keeps the old file when
+      # hairball replaces it with a new one.
+      - ./data/vps-back/static/hairball:/srv/hairball:ro
     networks: [portfolio]
     restart: unless-stopped
     logging: *logging
@@ -420,8 +426,10 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: "3000"
+      ACTIVITY_CALENDAR_FILE: /srv/hairball/calendar.json
     volumes:
       - ./data/fonts:/app/build/client/fonts:ro
+      - ./data/vps-back/static/hairball:/srv/hairball:ro
     networks: [portfolio]
     restart: unless-stopped
     logging: *logging
